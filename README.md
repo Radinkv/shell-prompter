@@ -125,6 +125,29 @@ For things that take over the terminal — `claude`, `vim`, `ssh`, a Python REPL
 `top` — prompter hands them the real terminal so you can interact, instead of
 capturing their output. Claude marks these calls automatically.
 
+## Project layout
+
+```
+prompter/
+  constants.py   protocol strings + magic numbers, all named
+  colors.py      Palette (ANSI, auto-disabled off-TTY)
+  config.py      Config dataclass, ApprovalMode, load/save
+  risk.py        RiskTier, classify() — the safe/confirm/danger rules
+  shell.py       Shell + CommandResult — execution & cwd tracking
+  llm.py         ClaudeClient, run_command schema, system prompt
+  ui.py          Console + Decision — every print/input lives here
+  agent.py       Agent, Conversation — the orchestration loop only
+  cli.py         argument parsing, wiring, main()
+tests/
+  test_offline.py   no-network checks (run: python tests/test_offline.py)
+```
+
+The split follows a state boundary: stateful pieces (`Shell`, `Agent`,
+`ClaudeClient`, `Console`) are objects that get injected into each other; pure
+transforms (`classify`, `truncate`, config loading, context building) are plain
+functions. `Agent` orchestrates its collaborators and does no I/O or API calls
+itself, which is what makes it testable with a fake client + console.
+
 ## Safety notes
 
 - Commands come from a language model. The risk tiers and confirmation gate are
