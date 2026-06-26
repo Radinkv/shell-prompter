@@ -18,6 +18,7 @@ jobs:
     environment: ${{ format('{0}{1}', 'py', 'pi') }}
     permissions:
       id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
