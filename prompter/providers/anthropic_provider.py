@@ -22,6 +22,7 @@ from .base import (
     AssistantMessage,
     HistoryItem,
     ModelProvider,
+    ProviderAuthError,
     ProviderError,
     TurnCollector,
     ToolResultsMessage,
@@ -55,6 +56,9 @@ _TOOL_KEY_DESCRIPTION = "description"
 _TOOL_KEY_INPUT_SCHEMA = "input_schema"
 
 _CLIENT_INIT_ERROR = "Could not initialize the Anthropic client: {error}"
+# The SDK constructs lazily and raises a client-side TypeError at request time
+# when no key/token/profile can be resolved; treat that as an auth failure.
+_MISSING_AUTH_HINT = "authentication"
 
 _RUN_TOOL = {
     _TOOL_KEY_NAME: TOOL_NAME,
@@ -127,12 +131,17 @@ class AnthropicProvider(ModelProvider):
         return request
 
     def run_stream(self, request, collector: TurnCollector) -> None:
-        with self._client.messages.stream(**request) as stream:
-            for event in stream:
-                if (event.type == _EVENT_CONTENT_BLOCK_DELTA
-                        and event.delta.type == _DELTA_TEXT):
-                    collector.add_text(event.delta.text)
-            final = stream.get_final_message()
+        try:
+            with self._client.messages.stream(**request) as stream:
+                for event in stream:
+                    if (event.type == _EVENT_CONTENT_BLOCK_DELTA
+                            and event.delta.type == _DELTA_TEXT):
+                        collector.add_text(event.delta.text)
+                final = stream.get_final_message()
+        except TypeError as e:
+            if _MISSING_AUTH_HINT in str(e).lower():
+                raise ProviderAuthError(str(e)) from e
+            raise
         for block in final.content:
             if block.type == _BLOCK_TOOL_USE:
                 collector.add_tool_call(block.id, block.input or {})

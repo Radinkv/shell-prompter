@@ -111,7 +111,8 @@ single run with a flag (see [Flags](#flags)).
 
 The model backend sits behind one small interface, so prompter behaves the same
 whichever you pick. Switch with `provider` in config, or `--provider` for one
-run.
+run. Provider names are case-insensitive, and `claude`, `gpt`, and `google` work
+as aliases.
 
 | Provider | Default model | API key | Notes |
 |----------|---------------|---------|-------|
@@ -140,7 +141,10 @@ order:
 
 The environment variable always wins, so CI and one-off overrides keep working.
 
-Store a key once and forget about env vars:
+If no key is found when you run a command, prompter asks you to paste one and
+saves it for next time. Press Enter without typing to exit instead.
+
+Store a key ahead of time and forget about env vars:
 
 ```bash
 prompter keys set anthropic     # prompts for the key, input hidden

@@ -256,13 +256,13 @@ def create_provider(config: "Config") -> ModelProvider:
     return factory(config)
 
 
-def import_optional(module_name: str):
+def import_optional(module_name: str, package: str | None = None):
     """Import a provider SDK, with an actionable error if it's missing.
 
     The provider SDKs ship as core dependencies, so this only fires on a broken
     or partial install.
     """
     try:
-        return importlib.import_module(module_name)
+        return importlib.import_module(module_name, package)
     except ImportError as e:
         raise ProviderNotInstalled(_MISSING_PACKAGE.format(module=module_name)) from e

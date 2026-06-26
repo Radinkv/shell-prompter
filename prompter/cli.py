@@ -13,12 +13,15 @@ from .config import (
     CONFIG_PATH,
     Config,
     PROGRAM_NAME,
+    PROVIDER_OPENAI,
     default_api_key_env,
     default_model_for,
     load_config,
+    normalize_provider,
 )
-from .keys import KEYS_PATH, clear_key, resolve_api_key, set_key, stored_key
+from .keys import KEYS_PATH, clear_key, set_key, stored_key
 from .providers import (
+    ModelProvider,
     ProviderAuthError,
     ProviderError,
     create_provider,
@@ -35,8 +38,20 @@ SIGINT_EXIT_CODE = 130
 _DESCRIPTION = "Describe what you want; prompter runs the shell commands."
 _EPILOG = "Manage API keys with:  prompter keys [list | set <provider> | clear <provider>]"
 _EXIT_WORDS = {"exit", "quit", ":q"}
-_MISSING_KEY_TEMPLATE = (
-    "No API key for {provider}. Run `prompter keys set {provider}` or export {env}."
+_MODEL_IS_PROVIDER = (
+    "'{value}' is a provider, not a model. Use `prompter --provider {provider}`. "
+    "The --model flag takes a model id like '{example}'."
+)
+_BAD_MAX_FIX = "--max-fix must be at least 1 (got {value})."
+_BASE_URL_IGNORED = (
+    "Note: base_url only applies to the openai provider; ignoring it for {provider}."
+)
+_NO_KEY_INTRO = "No API key found for {provider}."
+_AUTH_FAILED_INTRO = "Authentication failed for {provider}."
+_KEY_INPUT_OR_EXIT = "Paste your {provider} API key, or press Enter to exit: "
+_NO_KEY_EXIT = (
+    "No key provided, exiting. Set one later with `prompter keys set {provider}` "
+    "or export {env}."
 )
 
 _KEYS_COMMAND = "keys"
@@ -90,6 +105,7 @@ def _apply_overrides(args, config: Config) -> None:
     """CLI flags override config values for this run; resolve the model."""
     if args.provider:
         config.provider = args.provider
+    config.provider = normalize_provider(config.provider)
     if args.base_url:
         config.base_url = args.base_url
     if args.workspace:
@@ -107,16 +123,63 @@ def _resolve_mode(args, config: Config) -> ApprovalMode:
     return ApprovalMode.SMART
 
 
-def make_agent(args, config: Config, console: Console) -> Agent:
-    _apply_overrides(args, config)
-    if not resolve_api_key(config):
-        console.note(_MISSING_KEY_TEMPLATE.format(
-            provider=config.provider, env=config.key_env))
-    mode = _resolve_mode(args, config)
+def _reject_provider_as_model(args) -> None:
+    """`--model gemini` is almost always a mix-up for `--provider gemini`."""
+    if not args.model:
+        return
+    provider = normalize_provider(args.model)
+    if provider in known_providers():
+        sys.exit(_MODEL_IS_PROVIDER.format(
+            value=args.model, provider=provider, example=default_model_for(provider)))
+
+
+def _validate_config(config: Config, console: Console) -> None:
+    if config.max_fix_attempts < 1:
+        sys.exit(_BAD_MAX_FIX.format(value=config.max_fix_attempts))
+    if config.base_url and config.provider != PROVIDER_OPENAI:
+        console.note(_BASE_URL_IGNORED.format(provider=config.provider))
+
+
+def _prompt_for_key(config: Config) -> str:
     try:
-        provider = create_provider(config)
+        return getpass.getpass(
+            _KEY_INPUT_OR_EXIT.format(provider=config.provider)).strip()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
+def _prompt_and_store_key(config: Config, intro: str) -> bool:
+    """Ask for a key (after printing intro), store it, return whether we got one."""
+    print(intro.format(provider=config.provider), file=sys.stderr)
+    key = _prompt_for_key(config)
+    if not key:
+        return False
+    set_key(config.provider, key)
+    print(_KEY_SAVED.format(provider=config.provider, path=KEYS_PATH))
+    return True
+
+
+def _create_provider_or_prompt(config: Config) -> ModelProvider:
+    if config.provider not in known_providers():
+        sys.exit(unknown_provider_message(config.provider))
+    try:
+        return create_provider(config)
+    except ProviderError:
+        pass
+    if not _prompt_and_store_key(config, _NO_KEY_INTRO):
+        sys.exit(_NO_KEY_EXIT.format(provider=config.provider, env=config.key_env))
+    try:
+        return create_provider(config)
     except ProviderError as e:
         sys.exit(str(e))
+
+
+def make_agent(args, config: Config, console: Console) -> Agent:
+    _reject_provider_as_model(args)
+    _apply_overrides(args, config)
+    _validate_config(config, console)
+    mode = _resolve_mode(args, config)
+    provider = _create_provider_or_prompt(config)
     return Agent(provider, Shell(), console, config, mode)
 
 
@@ -135,33 +198,49 @@ def _handle_api(console: Console, exc: BaseException) -> int:
     return ERROR_EXIT_CODE
 
 
+# ProviderAuthError is handled directly in run() (prompt for a key + retry once),
+# so it is not in this registry.
 _ERROR_HANDLERS = [
     ((KeyboardInterrupt, QuitRequested), _handle_interrupt),
-    (ProviderAuthError, _handle_auth),
     (ProviderError, _handle_api),
 ]
 
 
-def _dispatch(agent: Agent, console: Console, goal: str) -> None:
+def _dispatch(agent: Agent, goal: str) -> None:
     if goal:
         agent.run_turn(goal)
     else:
-        _repl(agent, console)
+        _repl(agent, agent.console)
+
+
+def _attempt(args, config: Config, console: Console, show_banner: bool) -> int:
+    agent = make_agent(args, config, console)
+    if show_banner:
+        console.banner(config, agent.mode)
+    goal = " ".join(args.prompt).strip()
+    _dispatch(agent, goal)
+    return OK_EXIT_CODE
+
+
+def _dispatch_error(console: Console, exc: BaseException) -> int:
+    for exc_types, handler in _ERROR_HANDLERS:
+        if isinstance(exc, exc_types):
+            return handler(console, exc)
+    raise exc
 
 
 def run(args, console: Console) -> int:
     config = load_config()
-    agent = make_agent(args, config, console)
-    console.banner(config, agent.mode)
-    goal = " ".join(args.prompt).strip()
-    try:
-        _dispatch(agent, console, goal)
-    except BaseException as exc:
-        for exc_types, handler in _ERROR_HANDLERS:
-            if isinstance(exc, exc_types):
-                return handler(console, exc)
-        raise
-    return OK_EXIT_CODE
+    for attempt in range(2):
+        try:
+            return _attempt(args, config, console, show_banner=(attempt == 0))
+        except ProviderAuthError as exc:
+            if attempt == 0 and _prompt_and_store_key(config, _AUTH_FAILED_INTRO):
+                continue
+            return _handle_auth(console, exc)
+        except (KeyboardInterrupt, Exception) as exc:
+            return _dispatch_error(console, exc)
+    return ERROR_EXIT_CODE
 
 
 def _repl(agent: Agent, console: Console) -> None:

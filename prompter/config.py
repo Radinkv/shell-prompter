@@ -57,6 +57,20 @@ class ApprovalMode(Enum):
     YOLO = "yolo"
 
 
+PROVIDER_ALIASES = {
+    "claude": PROVIDER_ANTHROPIC,
+    "gpt": PROVIDER_OPENAI,
+    "chatgpt": PROVIDER_OPENAI,
+    "google": PROVIDER_GEMINI,
+}
+
+
+def normalize_provider(name: str) -> str:
+    """Lowercase and de-alias a provider name (Gemini, claude, gpt, ...)."""
+    key = (name or "").strip().lower()
+    return PROVIDER_ALIASES.get(key, key)
+
+
 def default_model_for(provider: str) -> str:
     return DEFAULT_MODELS.get(provider, "")
 

@@ -37,6 +37,20 @@ def test_key_env_override():
     assert Config(api_key_env="MY_KEY").key_env == "MY_KEY"
 
 
+@pytest.mark.parametrize("given, expected", [
+    ("anthropic", "anthropic"),
+    ("Gemini", "gemini"),
+    ("OPENAI", "openai"),
+    ("claude", "anthropic"),
+    ("gpt", "openai"),
+    ("chatgpt", "openai"),
+    ("google", "gemini"),
+    ("  Claude  ", "anthropic"),
+])
+def test_normalize_provider(given, expected):
+    assert config_mod.normalize_provider(given) == expected
+
+
 def test_workspace_path_expands():
     assert Config().workspace_path.endswith("/Code")
     assert "~" not in Config().workspace_path

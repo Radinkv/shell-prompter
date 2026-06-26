@@ -154,6 +154,29 @@ def test_anthropic_disable_tools_sets_choice():
     assert client.last_kwargs["tool_choice"] == {"type": "none"}
 
 
+class _RaisingClient:
+    def __init__(self, error):
+        self._error = error
+
+        def stream(**kwargs):
+            raise self._error
+        self.messages = _ns(stream=stream)
+
+
+def test_anthropic_missing_auth_becomes_auth_error():
+    client = _RaisingClient(TypeError("Could not resolve authentication method"))
+    provider = ap.AnthropicProvider(client, "m")
+    with pytest.raises(base.ProviderAuthError):
+        provider.complete([UserMessage("go")], ["sys"], False, lambda _t: None)
+
+
+def test_anthropic_other_typeerror_propagates():
+    client = _RaisingClient(TypeError("some unrelated bug"))
+    provider = ap.AnthropicProvider(client, "m")
+    with pytest.raises(TypeError):
+        provider.complete([UserMessage("go")], ["sys"], False, lambda _t: None)
+
+
 # ============================================================================
 # OpenAI adapter
 # ============================================================================
