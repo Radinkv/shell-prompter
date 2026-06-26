@@ -18,7 +18,9 @@ from .shell import CommandResult
 
 _TAGLINE = "natural-language shell agent"
 _MODE_PREFIX = "mode="
-_STATUS_TEMPLATE = "model: {model} · workspace: {workspace} · max-fix: {max_fix}"
+_STATUS_TEMPLATE = (
+    "{provider}/{model} · workspace: {workspace} · max-fix: {max_fix}"
+)
 _YOLO_WARNING = (
     "⚠ YOLO mode: every command runs without asking, including dangerous ones."
 )
@@ -39,8 +41,8 @@ _RETRY_PROMPT = "  Please answer y, n, a, or q."
 
 _STOPPED = "Stopped."
 _AUTH_ERROR = "Authentication failed."
-_AUTH_HINT = "Set ANTHROPIC_API_KEY or run `ant auth login`."
-_API_ERROR_PREFIX = "API error:"
+_AUTH_HINT = "Check your provider's API key (the *_API_KEY env var or config)."
+_API_ERROR_PREFIX = "Provider error:"
 
 _REPL_INTRO_TEMPLATE = (
     "Interactive mode. Type a request, or 'exit' to quit. Working dir: {cwd}"
@@ -77,7 +79,8 @@ class Console:
     def banner(self, config: Config, mode: ApprovalMode) -> None:
         c = self.c
         status = _STATUS_TEMPLATE.format(
-            model=config.model,
+            provider=config.provider,
+            model=config.resolved_model,
             workspace=config.workspace_path,
             max_fix=config.max_fix_attempts,
         )

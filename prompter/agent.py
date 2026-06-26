@@ -1,8 +1,9 @@
-"""The agent loop: drive Claude's tool calls, gate them by risk, run them, and
-keep the conversation and consecutive-failure state.
+"""The agent loop: drive the model's tool calls, gate them by risk, run them,
+and keep the conversation and consecutive-failure state.
 
-Agent orchestrates its injected collaborators (a ClaudeClient, a Shell, and a
-Console) but performs no I/O or API access of its own.
+The loop is provider-neutral — it speaks only the types in providers.base and
+calls one method, provider.complete(). Swapping Anthropic for OpenAI or Gemini
+changes nothing here.
 """
 
 from __future__ import annotations
@@ -10,24 +11,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import ApprovalMode, Config
-from .constants import (
-    BLOCK_TEXT,
-    BLOCK_TOOL_RESULT,
-    BLOCK_TOOL_USE,
-    FIELD_CONTENT,
-    FIELD_IS_ERROR,
-    FIELD_ROLE,
-    FIELD_TEXT,
-    FIELD_TOOL_USE_ID,
-    FIELD_TYPE,
-    INPUT_COMMAND,
-    INPUT_EXPLANATION,
-    INPUT_INTERACTIVE,
-    ROLE_ASSISTANT,
-    ROLE_USER,
-    STOP_REASON_TOOL_USE,
+from .prompts import build_system_texts
+from .providers.base import (
+    AssistantMessage,
+    AssistantTurn,
+    ModelProvider,
+    ToolInvocation,
+    ToolResult,
+    ToolResultsMessage,
+    UserMessage,
 )
-from .llm import ClaudeClient, build_environment_context, build_system_blocks
 from .risk import RiskAssessment, RiskTier, classify
 from .shell import CommandResult, Shell, looks_interactive
 from .ui import Console, Decision
@@ -37,9 +30,9 @@ _DECLINED_MESSAGE = (
     "Suggest an alternative or ask what they'd prefer."
 )
 _FORCE_STOP_TEMPLATE = (
-    "[prompter] {count} commands have failed in a row, reaching the "
-    "max_fix_attempts limit ({limit}). Stop running commands now. Briefly "
-    "explain what's going wrong and what the user could try."
+    "{count} commands have failed in a row, reaching the max_fix_attempts limit "
+    "({limit}). Stop running commands now. Briefly explain what's going wrong "
+    "and what the user could try."
 )
 _PAYLOAD_TEMPLATE = (
     "exit_code: {exit_code}\n"
@@ -60,13 +53,11 @@ class CommandRequest:
     interactive: bool
 
     @classmethod
-    def from_tool_input(cls, data: dict) -> "CommandRequest":
-        command = data.get(INPUT_COMMAND, "")
-        interactive = bool(data.get(INPUT_INTERACTIVE, False))
+    def from_invocation(cls, invocation: ToolInvocation) -> "CommandRequest":
         return cls(
-            command=command,
-            explanation=data.get(INPUT_EXPLANATION, ""),
-            interactive=interactive or looks_interactive(command),
+            command=invocation.command,
+            explanation=invocation.explanation,
+            interactive=invocation.interactive or looks_interactive(invocation.command),
         )
 
 
@@ -84,38 +75,25 @@ class ToolOutcome:
 
 
 class Conversation:
-    """The running Messages-API history."""
+    """The running neutral history handed to the provider each turn."""
 
     def __init__(self):
-        self.messages: list[dict] = []
+        self.history: list = []
 
-    def add_user_text(self, text: str) -> None:
-        self.messages.append({FIELD_ROLE: ROLE_USER, FIELD_CONTENT: text})
+    def add_user(self, text: str) -> None:
+        self.history.append(UserMessage(text))
 
-    def add_assistant(self, content) -> None:
-        self.messages.append({FIELD_ROLE: ROLE_ASSISTANT, FIELD_CONTENT: content})
+    def add_assistant(self, turn: AssistantTurn) -> None:
+        self.history.append(AssistantMessage(turn.text, turn.tool_calls))
 
-    def add_user_blocks(self, blocks: list[dict]) -> None:
-        self.messages.append({FIELD_ROLE: ROLE_USER, FIELD_CONTENT: blocks})
-
-
-def _tool_result_block(tool_use_id: str, outcome: "ToolOutcome") -> dict:
-    return {
-        FIELD_TYPE: BLOCK_TOOL_RESULT,
-        FIELD_TOOL_USE_ID: tool_use_id,
-        FIELD_CONTENT: outcome.text,
-        FIELD_IS_ERROR: outcome.is_error,
-    }
-
-
-def _text_block(text: str) -> dict:
-    return {FIELD_TYPE: BLOCK_TEXT, FIELD_TEXT: text}
+    def add_tool_results(self, results: list[ToolResult]) -> None:
+        self.history.append(ToolResultsMessage(results))
 
 
 class Agent:
-    def __init__(self, client: ClaudeClient, shell: Shell, console: Console,
+    def __init__(self, provider: ModelProvider, shell: Shell, console: Console,
                  config: Config, mode: ApprovalMode):
-        self.client = client
+        self.provider = provider
         self.shell = shell
         self.console = console
         self.config = config
@@ -128,54 +106,54 @@ class Agent:
     def run_turn(self, user_text: str) -> None:
         self.consecutive_failures = 0
         self._force_stop = False
-        self.conversation.add_user_text(user_text)
+        self.conversation.add_user(user_text)
         another_round = True
         while another_round:
             another_round = self._run_round()
 
     def _run_round(self) -> bool:
-        """Stream one assistant turn; return whether another round is needed."""
-        final = self._stream()
-        self.conversation.add_assistant(final.content)
-        if final.stop_reason != STOP_REASON_TOOL_USE:
+        """Run one model turn; return whether another round is needed."""
+        turn = self._complete()
+        self.conversation.add_assistant(turn)
+        if not turn.tool_calls:
             return False
-        results = self._process_tool_calls(final)
-        self._maybe_force_stop(results)
-        self.conversation.add_user_blocks(results)
+        results = self._process_tool_calls(turn.tool_calls)
+        self.conversation.add_tool_results(results)
+        self._maybe_force_stop()
         return True
 
-    def _stream(self):
-        context = build_environment_context(self.config, self.shell.cwd)
-        system_blocks = build_system_blocks(context)
+    def _complete(self) -> AssistantTurn:
+        system_texts = build_system_texts(self.config, self.shell.cwd)
         self.console.begin_stream()
-        final = self.client.stream(
-            self.conversation.messages,
-            system_blocks,
+        turn = self.provider.complete(
+            self.conversation.history,
+            system_texts,
             self._force_stop,
             self.console.stream_text,
         )
         self.console.end_stream()
-        return final
+        return turn
 
-    def _process_tool_calls(self, final) -> list[dict]:
+    def _process_tool_calls(self, tool_calls: list[ToolInvocation]) -> list[ToolResult]:
         results = []
-        for block in final.content:
-            if block.type != BLOCK_TOOL_USE:
-                continue
-            outcome = self._execute(CommandRequest.from_tool_input(block.input))
+        for invocation in tool_calls:
+            outcome = self._execute(CommandRequest.from_invocation(invocation))
             self.consecutive_failures = (
                 self.consecutive_failures + 1 if outcome.is_failure else 0
             )
-            results.append(_tool_result_block(block.id, outcome))
+            results.append(
+                ToolResult(invocation.call_id, outcome.text, outcome.is_error)
+            )
         return results
 
-    def _maybe_force_stop(self, results: list[dict]) -> None:
+    def _maybe_force_stop(self) -> None:
         """Bound the self-repair loop once too many commands fail in a row."""
         limit = self.config.max_fix_attempts
         if self.consecutive_failures < limit or self._force_stop:
             return
-        results.append(_text_block(_FORCE_STOP_TEMPLATE.format(
-            count=self.consecutive_failures, limit=limit)))
+        message = _FORCE_STOP_TEMPLATE.format(
+            count=self.consecutive_failures, limit=limit)
+        self.conversation.add_user(message)
         self._force_stop = True
         self.console.force_stop_notice(limit)
 

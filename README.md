@@ -1,9 +1,10 @@
 # prompter
 
-A natural-language shell agent powered by Claude. You describe what you want in
-plain English; `prompter` figures out the shell commands, shows each one with a
-risk rating, asks before anything non-trivial, and runs them — tracking the
-working directory as it goes, just like a real shell session.
+A natural-language shell agent powered by your choice of model — Claude, OpenAI
+(or any OpenAI-compatible endpoint like Groq/OpenRouter), or Gemini. You describe
+what you want in plain English; `prompter` figures out the shell commands, shows
+each one with a risk rating, asks before anything non-trivial, and runs them —
+tracking the working directory as it goes, just like a real shell session.
 
 ```
 $ prompter "make a folder called scratch, cd into it, then run claude"
@@ -18,13 +19,18 @@ becomes one of the tools prompter can invoke, not the thing you're inside of.
 
 ## Install
 
-Requires Python 3.9+ and an Anthropic API key (or a saved `ant auth login`).
+Requires Python 3.9+. The default provider is Anthropic (ships in the base
+install); add an extra for OpenAI or Gemini.
 
 ```bash
 cd shell-prompter
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
-export ANTHROPIC_API_KEY=sk-ant-...      # or run `ant auth login`
+pip install -e .              # Anthropic (default)
+pip install -e ".[openai]"    # + OpenAI / Groq / OpenRouter
+pip install -e ".[gemini]"    # + Gemini
+pip install -e ".[all]"       # everything
+
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / GEMINI_API_KEY
 ```
 
 Now `prompter` is on your PATH (inside the venv). To use it from anywhere
@@ -41,7 +47,10 @@ On first run, prompter writes `~/.prompter/config.json`:
 ```json
 {
   "default_workspace": "~/Code",
-  "model": "claude-sonnet-4-6",
+  "provider": "anthropic",
+  "model": "",
+  "base_url": null,
+  "api_key_env": null,
   "max_fix_attempts": 3,
   "auto_approve_safe": true,
   "preferences": [
@@ -53,17 +62,41 @@ On first run, prompter writes `~/.prompter/config.json`:
 - **`default_workspace`** — where new projects go when you don't say where. So
   `prompter "make a project called hunchday and run claude"` creates
   `~/Code/hunchday`, not a folder in whatever directory you happened to be in.
-- **`model`** — defaults to `claude-sonnet-4-6`. This agent does mostly simple,
-  latency-sensitive shell planning, which Sonnet handles well and cheaply. Bump
-  to `claude-opus-4-8` for genuinely hard tasks (big multi-step setups, tricky
-  debugging) — set it here, or per-run with `--model`.
+- **`provider`** — `anthropic`, `openai`, or `gemini`. See [Providers](#providers).
+- **`model`** — empty means "use the provider's default" (Anthropic →
+  `claude-sonnet-4-6`, OpenAI → `gpt-5`, Gemini → `gemini-2.5-flash`). Set it to
+  pin a model, or override per-run with `--model`.
+- **`base_url`** — point the OpenAI adapter at a compatible endpoint (Groq,
+  OpenRouter). Ignored by the other providers.
+- **`api_key_env`** — override which environment variable holds the API key
+  (default is `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`).
 - **`preferences`** — free-form lines handed straight to the model. Add your own
   (`"Use pnpm, not npm."`, `"Default Python to a .venv."`) and they're respected.
 - **`max_fix_attempts`** — see the retry section below.
 - **`auto_approve_safe`** — set to `false` to make prompter confirm *everything*.
 
-Run `prompter --config` to print the path. Override per-run with `--workspace`,
-`--max-fix`, and `--model`.
+Run `prompter --config` to print the path. Override per-run with `--provider`,
+`--model`, `--base-url`, `--workspace`, and `--max-fix`.
+
+## Providers
+
+The model backend is pluggable behind one small interface, so the agent behaves
+identically whichever you pick. Switch with `provider` in config (or `--provider`).
+
+| Provider | Install | Default model | Key env | Notes |
+|----------|---------|---------------|---------|-------|
+| `anthropic` | base | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | Default; also reads an `ant auth login` profile. |
+| `openai` | `.[openai]` | `gpt-5` | `OPENAI_API_KEY` | Set `base_url` to use **Groq** or **OpenRouter** (both speak the OpenAI API). |
+| `gemini` | `.[gemini]` | `gemini-2.5-flash` | `GEMINI_API_KEY` | Has a generous free tier — good for everyday use. |
+
+A note on billing: an Anthropic Pro/Max **subscription** and an **API key** are
+separate accounts — a program can't bill against your web subscription. If you
+want a free tier for casual use, Gemini (or Groq/OpenRouter via the OpenAI
+adapter) is the way; switch to Anthropic when you want it.
+
+> The OpenAI and Gemini adapters are written against the standard SDK surfaces
+> but haven't been run live here — smoke-test them once with a real key. The
+> Anthropic adapter is the reference implementation.
 
 ## Self-repair, bounded
 
@@ -134,7 +167,10 @@ prompter/
   config.py      Config dataclass, ApprovalMode, load/save
   risk.py        RiskTier, classify() — the safe/confirm/danger rules
   shell.py       Shell + CommandResult — execution & cwd tracking
-  llm.py         ClaudeClient, run_command schema, system prompt
+  prompts.py     system prompt + per-turn environment context
+  providers/     pluggable model backends
+    base.py        neutral types, ModelProvider ABC, registry
+    anthropic_provider.py / openai_provider.py / gemini_provider.py
   ui.py          Console + Decision — every print/input lives here
   agent.py       Agent, Conversation — the orchestration loop only
   cli.py         argument parsing, wiring, main()
@@ -143,22 +179,28 @@ tests/
   test_*.py                  one unit-test module per package module
 ```
 
-The split follows a state boundary: stateful pieces (`Shell`, `Agent`,
-`ClaudeClient`, `Console`) are objects that get injected into each other; pure
+The split follows a state boundary: stateful pieces (`Shell`, `Agent`, the
+provider, `Console`) are objects that get injected into each other; pure
 transforms (`classify`, `truncate`, config loading, context building) are plain
 functions. `Agent` orchestrates its collaborators and does no I/O or API calls
-itself, which is what makes it testable with a fake client + console.
+itself, which is what makes it testable with a fake provider + console.
+
+Providers share a **template-method** base: `ModelProvider.complete()` owns the
+invariant algorithm (build request → stream into a `TurnCollector` → wrap errors
+→ return a turn); each adapter supplies only `build_request` and `run_stream`.
+Adding a backend is one file in `providers/` and a `@register` line — nothing in
+the agent changes.
 
 ## Tests
 
 ```bash
 pip install -e ".[dev]"   # installs pytest
-pytest                    # ~95 unit tests, no network or API key needed
+pytest                    # ~114 unit tests, no network or API key needed
 ```
 
-The agent loop is tested by injecting fakes for its collaborators (a scripted
-model client, a recording shell, a mock console), so the full
-stream → gate → run → repeat cycle is exercised offline.
+The agent loop is tested by injecting fakes (a scripted provider, a recording
+shell, a mock console), so the full stream → gate → run → repeat cycle runs
+offline. Each adapter's neutral round-trip is tested with a fake SDK client.
 
 ## Safety notes
 

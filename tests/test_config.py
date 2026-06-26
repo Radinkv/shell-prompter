@@ -4,17 +4,37 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from prompter import config as config_mod
 from prompter.config import ApprovalMode, Config
 
 
 def test_defaults():
     cfg = Config()
-    assert cfg.model == "claude-sonnet-4-6"
-    assert cfg.default_workspace == "~/Code"
+    assert cfg.provider == "anthropic"
+    assert cfg.model == ""
+    assert cfg.resolved_model == "claude-sonnet-4-6"
+    assert cfg.key_env == "ANTHROPIC_API_KEY"
+    assert cfg.base_url is None
     assert cfg.max_fix_attempts == 3
-    assert cfg.auto_approve_safe is True
-    assert cfg.preferences
+
+
+@pytest.mark.parametrize("provider, model", [
+    ("anthropic", "claude-sonnet-4-6"),
+    ("openai", "gpt-5"),
+    ("gemini", "gemini-2.5-flash"),
+])
+def test_resolved_model_per_provider(provider, model):
+    assert Config(provider=provider).resolved_model == model
+
+
+def test_explicit_model_overrides_default():
+    assert Config(provider="openai", model="gpt-4o").resolved_model == "gpt-4o"
+
+
+def test_key_env_override():
+    assert Config(api_key_env="MY_KEY").key_env == "MY_KEY"
 
 
 def test_workspace_path_expands():
@@ -23,13 +43,13 @@ def test_workspace_path_expands():
 
 
 def test_from_dict_ignores_unknown_keys():
-    cfg = Config.from_dict({"model": "claude-opus-4-8", "bogus": 123})
-    assert cfg.model == "claude-opus-4-8"
+    cfg = Config.from_dict({"provider": "openai", "bogus": 123})
+    assert cfg.provider == "openai"
     assert not hasattr(cfg, "bogus")
 
 
 def test_round_trip():
-    cfg = Config(default_workspace="~/X", max_fix_attempts=5)
+    cfg = Config(provider="gemini", base_url="https://x", max_fix_attempts=5)
     assert Config.from_dict(cfg.to_dict()) == cfg
 
 
@@ -45,17 +65,18 @@ def test_load_writes_default_on_first_run(tmp_path, monkeypatch):
     cfg = config_mod.load_config()
     assert path.exists()
     data = json.loads(path.read_text())
-    assert data["model"] == "claude-sonnet-4-6"
+    assert data["provider"] == "anthropic"
+    assert data["model"] == ""
     assert cfg == Config()
 
 
 def test_load_reads_existing_file(tmp_path, monkeypatch):
     path = tmp_path / "config.json"
-    path.write_text(json.dumps({"model": "claude-opus-4-8", "default_workspace": "~/X"}))
+    path.write_text(json.dumps({"provider": "openai", "model": "gpt-4o"}))
     monkeypatch.setattr(config_mod, "CONFIG_PATH", str(path))
     cfg = config_mod.load_config()
-    assert cfg.model == "claude-opus-4-8"
-    assert cfg.default_workspace == "~/X"
+    assert cfg.provider == "openai"
+    assert cfg.model == "gpt-4o"
 
 
 def test_load_bad_file_falls_back(tmp_path, monkeypatch, capsys):

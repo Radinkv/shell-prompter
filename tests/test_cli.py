@@ -10,15 +10,16 @@ import pytest
 from prompter import cli
 from prompter.agent import QuitRequested
 from prompter.config import ApprovalMode, Config
+from prompter.providers.base import ProviderAuthError, ProviderError
 from prompter.ui import Console
 
 
 def test_parser_defaults():
     args = cli.build_parser().parse_args([])
     assert args.prompt == []
+    assert args.provider is None
     assert args.model is None
     assert args.yolo is False
-    assert args.max_fix is None
 
 
 def test_parser_collects_prompt_and_flags():
@@ -27,24 +28,34 @@ def test_parser_collects_prompt_and_flags():
     assert args.yolo is True
 
 
-def test_apply_overrides_model_precedence():
-    args = cli.build_parser().parse_args(["--model", "claude-haiku-4-5"])
-    cfg = Config(model="claude-opus-4-8")
-    cli._apply_overrides(args, cfg)
-    assert cfg.model == "claude-haiku-4-5"
-
-
-def test_apply_overrides_config_model_when_no_flag():
+def test_apply_overrides_resolves_default_model():
     args = cli.build_parser().parse_args([])
-    cfg = Config(model="claude-opus-4-8")
-    cli._apply_overrides(args, cfg)
-    assert cfg.model == "claude-opus-4-8"
-
-
-def test_apply_overrides_workspace_and_max_fix():
-    args = cli.build_parser().parse_args(["--workspace", "~/P", "--max-fix", "7"])
     cfg = Config()
     cli._apply_overrides(args, cfg)
+    assert cfg.model == "claude-sonnet-4-6"
+
+
+def test_apply_overrides_provider_changes_default_model():
+    args = cli.build_parser().parse_args(["--provider", "openai"])
+    cfg = Config()
+    cli._apply_overrides(args, cfg)
+    assert cfg.provider == "openai"
+    assert cfg.model == "gpt-5"
+
+
+def test_apply_overrides_model_flag_wins():
+    args = cli.build_parser().parse_args(["--provider", "gemini", "--model", "x"])
+    cfg = Config()
+    cli._apply_overrides(args, cfg)
+    assert cfg.model == "x"
+
+
+def test_apply_overrides_base_url_and_workspace():
+    args = cli.build_parser().parse_args(
+        ["--base-url", "https://groq", "--workspace", "~/P", "--max-fix", "7"])
+    cfg = Config()
+    cli._apply_overrides(args, cfg)
+    assert cfg.base_url == "https://groq"
     assert cfg.default_workspace == "~/P"
     assert cfg.max_fix_attempts == 7
 
@@ -67,18 +78,16 @@ def test_resolve_mode_config_disables_auto_approve():
 # -- error-handler registry --------------------------------------------------
 def test_error_registry_structure():
     assert cli._ERROR_HANDLERS[0][0] == (KeyboardInterrupt, QuitRequested)
-    assert cli._ERROR_HANDLERS[0][1] is cli._handle_interrupt
-    handlers = [h for _, h in cli._ERROR_HANDLERS]
-    assert cli._handle_auth in handlers
-    assert cli._handle_api in handlers
+    assert cli._ERROR_HANDLERS[1] == (ProviderAuthError, cli._handle_auth)
+    assert cli._ERROR_HANDLERS[2] == (ProviderError, cli._handle_api)
 
 
 def test_handlers_return_codes():
     console = MagicMock(spec=Console)
     assert cli._handle_interrupt(console, KeyboardInterrupt()) == cli.SIGINT_EXIT_CODE
     console.stopped.assert_called_once()
-    assert cli._handle_auth(console, Exception()) == cli.ERROR_EXIT_CODE
-    assert cli._handle_api(console, Exception("x")) == cli.ERROR_EXIT_CODE
+    assert cli._handle_auth(console, ProviderAuthError()) == cli.ERROR_EXIT_CODE
+    assert cli._handle_api(console, ProviderError("x")) == cli.ERROR_EXIT_CODE
 
 
 def _stub_run(monkeypatch, raiser):
@@ -97,6 +106,15 @@ def test_run_dispatches_interrupt(monkeypatch):
     _stub_run(monkeypatch, boom)
     args = cli.build_parser().parse_args([])
     assert cli.run(args, MagicMock(spec=Console)) == cli.SIGINT_EXIT_CODE
+
+
+def test_run_dispatches_provider_auth(monkeypatch):
+    def boom(agent, console, goal):
+        raise ProviderAuthError("nope")
+
+    _stub_run(monkeypatch, boom)
+    args = cli.build_parser().parse_args([])
+    assert cli.run(args, MagicMock(spec=Console)) == cli.ERROR_EXIT_CODE
 
 
 def test_run_reraises_unmapped(monkeypatch):

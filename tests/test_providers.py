@@ -1,0 +1,322 @@
+"""Unit tests for the provider abstraction and the three adapters.
+
+Each adapter's neutral round-trip (history -> wire, stream -> AssistantTurn) is
+exercised with a fake SDK client, so no network or API key is needed.
+"""
+
+from __future__ import annotations
+
+import types
+
+import pytest
+
+from prompter.config import Config
+from prompter.providers import base
+from prompter.providers.base import (
+    AssistantMessage,
+    ToolInvocation,
+    ToolResult,
+    ToolResultsMessage,
+    TurnCollector,
+    UserMessage,
+    create_provider,
+    known_providers,
+    tool_invocation_from_args,
+)
+from prompter.providers import anthropic_provider as ap
+from prompter.providers import gemini_provider as gp
+from prompter.providers import openai_provider as op
+
+
+def _ns(**kw):
+    return types.SimpleNamespace(**kw)
+
+
+# ============================================================================
+# base: registry, collector, invocation helper
+# ============================================================================
+def test_known_providers_registered():
+    assert set(known_providers()) >= {"anthropic", "openai", "gemini"}
+
+
+def test_create_unknown_provider_errors():
+    with pytest.raises(base.ProviderError):
+        create_provider(Config(provider="nope"))
+
+
+def test_tool_invocation_from_args():
+    inv = tool_invocation_from_args("id1", {"command": "ls", "interactive": True})
+    assert inv.call_id == "id1"
+    assert inv.command == "ls"
+    assert inv.interactive is True
+    assert inv.explanation == ""
+
+
+def test_tool_invocation_from_empty_args():
+    inv = tool_invocation_from_args("id", None)
+    assert inv.command == "" and inv.interactive is False
+
+
+def test_turn_collector():
+    streamed = []
+    collector = TurnCollector(streamed.append)
+    collector.add_text("hello ")
+    collector.add_text(None)
+    collector.add_text("world")
+    collector.add_tool_call("c1", {"command": "ls"})
+    turn = collector.finish()
+    assert streamed == ["hello ", "world"]
+    assert turn.text == "hello world"
+    assert turn.tool_calls[0].command == "ls"
+
+
+def test_import_optional_missing():
+    with pytest.raises(base.ProviderNotInstalled):
+        base.import_optional("definitely_not_a_real_module_xyz", "extra")
+
+
+# ============================================================================
+# Anthropic adapter
+# ============================================================================
+class _AnthropicStream:
+    def __init__(self, events, final):
+        self._events = events
+        self._final = final
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __iter__(self):
+        return iter(self._events)
+
+    def get_final_message(self):
+        return self._final
+
+
+class _AnthropicClient:
+    def __init__(self, events, final):
+        self._events = events
+        self._final = final
+        self.last_kwargs = None
+        self.messages = _ns(stream=self._stream)
+
+    def _stream(self, **kwargs):
+        self.last_kwargs = kwargs
+        return _AnthropicStream(self._events, self._final)
+
+
+def _text_delta(text):
+    return _ns(type="content_block_delta", delta=_ns(type="text_delta", text=text))
+
+
+def test_anthropic_to_messages_round_trip():
+    history = [
+        UserMessage("hi"),
+        AssistantMessage("ok", [ToolInvocation("c1", "ls", "list", False)]),
+        ToolResultsMessage([ToolResult("c1", "out", False)]),
+    ]
+    messages = ap._to_messages(history)
+    assert messages[0] == {"role": "user", "content": "hi"}
+    assistant = messages[1]
+    assert assistant["role"] == "assistant"
+    assert any(b["type"] == "tool_use" and b["id"] == "c1"
+               for b in assistant["content"])
+    result_block = messages[2]["content"][0]
+    assert result_block["type"] == "tool_result"
+    assert result_block["tool_use_id"] == "c1"
+    assert result_block["is_error"] is False
+
+
+def test_anthropic_complete_parses_text_and_tool():
+    final = _ns(content=[
+        _ns(type="text", text="working"),
+        _ns(type="tool_use", id="t1",
+            input={"command": "ls", "explanation": "x", "interactive": False}),
+    ])
+    client = _AnthropicClient([_text_delta("work"), _text_delta("ing")], final)
+    provider = ap.AnthropicProvider(client, "claude-test")
+    streamed = []
+    turn = provider.complete([UserMessage("go")], ["sys"], False, streamed.append)
+    assert streamed == ["work", "ing"]
+    assert turn.text == "working"
+    assert turn.tool_calls[0].call_id == "t1"
+    assert turn.tool_calls[0].command == "ls"
+    assert "tool_choice" not in client.last_kwargs
+
+
+def test_anthropic_disable_tools_sets_choice():
+    final = _ns(content=[_ns(type="text", text="done")])
+    client = _AnthropicClient([], final)
+    ap.AnthropicProvider(client, "m").complete([], ["sys"], True, lambda _t: None)
+    assert client.last_kwargs["tool_choice"] == {"type": "none"}
+
+
+# ============================================================================
+# OpenAI adapter
+# ============================================================================
+class _FakeOpenAIErrors:
+    class AuthenticationError(Exception):
+        pass
+
+    class OpenAIError(Exception):
+        pass
+
+
+class _OpenAIClient:
+    def __init__(self, chunks):
+        self._chunks = chunks
+        self.last_params = None
+        self.chat = _ns(completions=_ns(create=self._create))
+
+    def _create(self, **params):
+        self.last_params = params
+        return iter(self._chunks)
+
+
+def _openai_chunk(content=None, tool_calls=None):
+    return _ns(choices=[_ns(delta=_ns(content=content, tool_calls=tool_calls))])
+
+
+def _tc_delta(index, call_id=None, arguments=None):
+    function = _ns(name="run_command", arguments=arguments) if arguments else None
+    return _ns(index=index, id=call_id, function=function)
+
+
+def test_openai_to_messages_round_trip():
+    history = [
+        UserMessage("hi"),
+        AssistantMessage("", [ToolInvocation("c1", "ls", "list", False)]),
+        ToolResultsMessage([ToolResult("c1", "out", False)]),
+    ]
+    messages = op._to_messages(["sysA", "sysB"], history)
+    assert messages[0]["role"] == "system"
+    assert "sysA" in messages[0]["content"] and "sysB" in messages[0]["content"]
+    assert messages[1] == {"role": "user", "content": "hi"}
+    assert messages[2]["role"] == "assistant"
+    assert messages[2]["tool_calls"][0]["id"] == "c1"
+    assert messages[3] == {"role": "tool", "tool_call_id": "c1", "content": "out"}
+
+
+def test_openai_complete_accumulates_tool_call():
+    chunks = [
+        _openai_chunk(content="th"),
+        _openai_chunk(content="inking"),
+        _openai_chunk(tool_calls=[_tc_delta(0, "call_1", '{"command": "l')]),
+        _openai_chunk(tool_calls=[_tc_delta(0, None, 's -la"}')]),
+    ]
+    client = _OpenAIClient(chunks)
+    provider = op.OpenAIProvider(_FakeOpenAIErrors, client, "gpt-test")
+    streamed = []
+    turn = provider.complete([UserMessage("go")], ["sys"], False, streamed.append)
+    assert turn.text == "thinking"
+    assert len(turn.tool_calls) == 1
+    assert turn.tool_calls[0].call_id == "call_1"
+    assert turn.tool_calls[0].command == "ls -la"
+    assert "tools" in client.last_params
+
+
+def test_openai_disable_tools_omits_tools():
+    client = _OpenAIClient([_openai_chunk(content="hi")])
+    op.OpenAIProvider(_FakeOpenAIErrors, client, "m").complete(
+        [], ["sys"], True, lambda _t: None)
+    assert "tools" not in client.last_params
+
+
+def test_openai_parse_args_bad_json():
+    assert op._parse_args("{bad") == {}
+    assert op._parse_args("") == {}
+
+
+# ============================================================================
+# Gemini adapter
+# ============================================================================
+def _fake_genai_types():
+    return _ns(
+        Content=lambda role=None, parts=None: _ns(role=role, parts=parts),
+        Part=lambda text=None, function_call=None, function_response=None: _ns(
+            text=text, function_call=function_call, function_response=function_response),
+        FunctionCall=lambda name=None, args=None, id=None: _ns(
+            name=name, args=args, id=id),
+        FunctionResponse=lambda name=None, response=None: _ns(
+            name=name, response=response),
+        Tool=lambda function_declarations=None: _ns(
+            function_declarations=function_declarations),
+        FunctionDeclaration=lambda name=None, description=None, parameters=None: _ns(
+            name=name, description=description, parameters=parameters),
+        Schema=lambda type=None, properties=None, description=None, required=None: _ns(
+            type=type, properties=properties, description=description, required=required),
+        GenerateContentConfig=lambda **kw: _ns(**kw),
+    )
+
+
+class _FakeGenaiErrors:
+    class APIError(Exception):
+        pass
+
+
+class _GeminiClient:
+    def __init__(self, chunks):
+        self._chunks = chunks
+        self.last_contents = None
+        self.models = _ns(generate_content_stream=self._stream)
+
+    def _stream(self, model, contents, config):
+        self.last_contents = contents
+        return iter(self._chunks)
+
+
+def test_gemini_chunk_text_handles_raise():
+    class Raising:
+        @property
+        def text(self):
+            raise ValueError("no text part")
+
+    assert gp._chunk_text(Raising()) is None
+    assert gp._chunk_text(_ns(text="hi")) == "hi"
+
+
+def test_gemini_chunk_function_calls_from_candidates():
+    call = _ns(name="run_command", args={"command": "ls"})
+    chunk = _ns(function_calls=None,
+                candidates=[_ns(content=_ns(parts=[_ns(function_call=call)]))])
+    assert gp._chunk_function_calls(chunk) == [call]
+
+
+def test_gemini_is_auth_error():
+    assert gp._is_auth_error(_ns(code=403)) is True
+    assert gp._is_auth_error(Exception("Invalid API key")) is True
+    assert gp._is_auth_error(Exception("server boom")) is False
+
+
+def test_gemini_to_contents():
+    provider = gp.GeminiProvider(_FakeGenaiErrors, _fake_genai_types(), None, "m")
+    contents = provider._to_contents([
+        UserMessage("hi"),
+        AssistantMessage("", [ToolInvocation("c1", "ls", "list", False)]),
+        ToolResultsMessage([ToolResult("c1", "out", False)]),
+    ])
+    assert contents[0].role == "user"
+    assert contents[0].parts[0].text == "hi"
+    assert contents[1].role == "model"
+    assert contents[1].parts[0].function_call.name == "run_command"
+    assert contents[2].parts[0].function_response.response == {"output": "out"}
+
+
+def test_gemini_complete_round_trip():
+    fc = _ns(name="run_command", id="g1",
+             args={"command": "ls", "explanation": "x", "interactive": False})
+    chunks = [
+        _ns(text="hi", function_calls=[]),
+        _ns(text=None, function_calls=[fc]),
+    ]
+    client = _GeminiClient(chunks)
+    provider = gp.GeminiProvider(
+        _FakeGenaiErrors, _fake_genai_types(), client, "gemini-test")
+    streamed = []
+    turn = provider.complete([UserMessage("go")], ["sys"], False, streamed.append)
+    assert turn.text == "hi"
+    assert turn.tool_calls[0].call_id == "g1"
+    assert turn.tool_calls[0].command == "ls"

@@ -2,53 +2,56 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from prompter.agent import Agent, CommandRequest, Conversation, QuitRequested
 from prompter.config import ApprovalMode, Config
+from prompter.providers.base import (
+    AssistantMessage,
+    ToolInvocation,
+    ToolResultsMessage,
+    UserMessage,
+)
 from prompter.risk import RiskTier
 from prompter.shell import CommandResult
-from prompter.ui import Console, Decision
+from prompter.ui import Decision
 
-from _helpers import FakeShell, LoopingClaude, ScriptedClaude, final_message, \
-    text_block, tool_use_block
+from _helpers import FakeProvider, FakeShell, LoopingProvider, make_call, make_turn
 
 
-def _agent(client, shell, console, mode=ApprovalMode.YOLO, config=None):
-    return Agent(client, shell, console, config or Config(), mode)
+def _agent(provider, shell, console, mode=ApprovalMode.YOLO, config=None):
+    return Agent(provider, shell, console, config or Config(), mode)
 
 
 # -- CommandRequest ----------------------------------------------------------
 def test_request_infers_interactive():
-    req = CommandRequest.from_tool_input({"command": "claude", "explanation": "x"})
+    req = CommandRequest.from_invocation(ToolInvocation("c", "claude"))
     assert req.interactive is True
 
 
 def test_request_respects_explicit_flag():
-    req = CommandRequest.from_tool_input(
-        {"command": "ls", "explanation": "x", "interactive": True})
+    req = CommandRequest.from_invocation(ToolInvocation("c", "ls", interactive=True))
     assert req.interactive is True
 
 
-def test_request_defaults():
-    req = CommandRequest.from_tool_input({})
-    assert req.command == "" and req.explanation == "" and req.interactive is False
+def test_request_plain_command_not_interactive():
+    req = CommandRequest.from_invocation(ToolInvocation("c", "ls -la"))
+    assert req.interactive is False
 
 
 # -- Conversation ------------------------------------------------------------
-def test_conversation_roles():
+def test_conversation_item_types():
     conv = Conversation()
-    conv.add_user_text("hi")
-    conv.add_assistant([text_block()])
-    conv.add_user_blocks([{"type": "tool_result"}])
-    assert [m["role"] for m in conv.messages] == ["user", "assistant", "user"]
+    conv.add_user("hi")
+    conv.add_assistant(make_turn(text="ok"))
+    conv.add_tool_results([])
+    assert [type(i) for i in conv.history] == \
+        [UserMessage, AssistantMessage, ToolResultsMessage]
 
 
 # -- approval policy ---------------------------------------------------------
 def test_auto_approves_matrix(mock_console):
-    agent = _agent(MagicMock(), FakeShell(), mock_console, ApprovalMode.SMART)
+    agent = _agent(FakeProvider([]), FakeShell(), mock_console, ApprovalMode.SMART)
     assert agent._auto_approves(RiskTier.SAFE) is True
     assert agent._auto_approves(RiskTier.CONFIRM) is False
 
@@ -65,68 +68,69 @@ def test_auto_approves_matrix(mock_console):
 
 # -- the loop ----------------------------------------------------------------
 def test_run_turn_no_tools(mock_console):
-    client = ScriptedClaude([final_message("end_turn", [text_block("done")])])
-    agent = _agent(client, FakeShell(), mock_console)
+    provider = FakeProvider([make_turn(text="done")])
+    agent = _agent(provider, FakeShell(), mock_console)
     agent.run_turn("just talk")
-    assert [m["role"] for m in agent.conversation.messages] == ["user", "assistant"]
-    assert client.disable_tools_log == [False]
+    assert [type(i) for i in agent.conversation.history] == \
+        [UserMessage, AssistantMessage]
+    assert provider.disable_tools_log == [False]
 
 
 def test_run_turn_executes_tool(mock_console):
     shell = FakeShell(results=[CommandResult(0, "done", "", False)])
-    client = ScriptedClaude([
-        final_message("tool_use", [tool_use_block("echo hi")]),
-        final_message("end_turn", [text_block("ok")]),
+    provider = FakeProvider([
+        make_turn(calls=[make_call("echo hi", call_id="c1")]),
+        make_turn(text="ok"),
     ])
-    agent = _agent(client, shell, mock_console)
+    agent = _agent(provider, shell, mock_console)
     agent.run_turn("do it")
 
     assert shell.calls == [("echo hi", False)]
-    assert [m["role"] for m in agent.conversation.messages] == \
-        ["user", "assistant", "user", "assistant"]
-    tool_result = agent.conversation.messages[2]["content"][0]
-    assert tool_result["type"] == "tool_result"
-    assert tool_result["is_error"] is False
-    assert "exit_code: 0" in tool_result["content"]
+    assert [type(i) for i in agent.conversation.history] == \
+        [UserMessage, AssistantMessage, ToolResultsMessage, AssistantMessage]
+    result = agent.conversation.history[2].results[0]
+    assert result.call_id == "c1"
+    assert result.is_error is False
+    assert "exit_code: 0" in result.content
     assert agent.consecutive_failures == 0
 
 
 def test_declined_command_not_run(mock_console):
     mock_console.confirm.return_value = Decision.SKIP
-    client = ScriptedClaude([
-        final_message("tool_use", [tool_use_block("rm -rf x")]),
-        final_message("end_turn", [text_block("ok")]),
+    provider = FakeProvider([
+        make_turn(calls=[make_call("rm -rf x")]),
+        make_turn(text="ok"),
     ])
     shell = FakeShell()
-    agent = _agent(client, shell, mock_console, ApprovalMode.ASK_ALL)
+    agent = _agent(provider, shell, mock_console, ApprovalMode.ASK_ALL)
     agent.run_turn("delete stuff")
 
     assert shell.calls == []
-    tool_result = agent.conversation.messages[2]["content"][0]
-    assert tool_result["is_error"] is True
-    assert "declined" in tool_result["content"].lower()
+    result = agent.conversation.history[2].results[0]
+    assert result.is_error is True
+    assert "declined" in result.content.lower()
 
 
 def test_quit_raises(mock_console):
     mock_console.confirm.return_value = Decision.QUIT
-    client = ScriptedClaude([final_message("tool_use", [tool_use_block("rm x")])])
-    agent = _agent(client, FakeShell(), mock_console, ApprovalMode.ASK_ALL)
+    provider = FakeProvider([make_turn(calls=[make_call("rm x")])])
+    agent = _agent(provider, FakeShell(), mock_console, ApprovalMode.ASK_ALL)
     with pytest.raises(QuitRequested):
         agent.run_turn("go")
 
 
 def test_bounded_retry_stops(mock_console):
-    client = LoopingClaude("false")
+    provider = LoopingProvider("false")
     shell = FakeShell(results=[CommandResult(1, "", "boom", False)] * 10)
-    agent = _agent(client, shell, mock_console, ApprovalMode.YOLO,
+    agent = _agent(provider, shell, mock_console, ApprovalMode.YOLO,
                    Config(max_fix_attempts=2))
     agent.run_turn("impossible task")
 
     assert agent.consecutive_failures == 2
     assert agent._force_stop is True
-    assert agent.conversation.messages[-1]["role"] == "assistant"
+    assert isinstance(agent.conversation.history[-1], AssistantMessage)
     mock_console.force_stop_notice.assert_called_once_with(2)
-    assert client.disable_tools_log[-1] is True
+    assert provider.disable_tools_log[-1] is True
 
 
 def test_successful_command_resets_failure_count(mock_console):
@@ -134,23 +138,23 @@ def test_successful_command_resets_failure_count(mock_console):
         CommandResult(1, "", "err", False),
         CommandResult(0, "ok", "", False),
     ])
-    client = ScriptedClaude([
-        final_message("tool_use", [tool_use_block("flaky")]),
-        final_message("tool_use", [tool_use_block("retry")]),
-        final_message("end_turn", [text_block("fixed")]),
+    provider = FakeProvider([
+        make_turn(calls=[make_call("flaky", call_id="a")]),
+        make_turn(calls=[make_call("retry", call_id="b")]),
+        make_turn(text="fixed"),
     ])
-    agent = _agent(client, shell, mock_console)
+    agent = _agent(provider, shell, mock_console)
     agent.run_turn("fix it")
     assert agent.consecutive_failures == 0
 
 
 def test_interactive_skips_output_render(mock_console):
     shell = FakeShell(results=[CommandResult(0, "ignored", "", False)])
-    client = ScriptedClaude([
-        final_message("tool_use", [tool_use_block("claude", interactive=True)]),
-        final_message("end_turn", [text_block("ok")]),
+    provider = FakeProvider([
+        make_turn(calls=[make_call("claude", interactive=True)]),
+        make_turn(text="ok"),
     ])
-    agent = _agent(client, shell, mock_console)
+    agent = _agent(provider, shell, mock_console)
     agent.run_turn("launch claude")
     assert shell.calls == [("claude", True)]
     mock_console.command_output.assert_not_called()

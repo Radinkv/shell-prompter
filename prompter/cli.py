@@ -6,25 +6,16 @@ import argparse
 import os
 import sys
 
-try:
-    import anthropic
-except ImportError:
-    sys.exit(
-        "The 'anthropic' package is required.\n"
-        "Install it with:  pip install anthropic\n"
-        "(or reinstall prompter with:  pip install -e .)"
-    )
-
 from .agent import Agent, QuitRequested
 from .config import (
     ApprovalMode,
     CONFIG_PATH,
     Config,
-    DEFAULT_MODEL,
     PROGRAM_NAME,
+    default_model_for,
     load_config,
 )
-from .llm import ClaudeClient
+from .providers import ProviderAuthError, ProviderError, create_provider
 from .shell import Shell
 from .ui import Console
 
@@ -32,53 +23,48 @@ OK_EXIT_CODE = 0
 ERROR_EXIT_CODE = 1
 SIGINT_EXIT_CODE = 130
 
-ENV_API_KEY = "ANTHROPIC_API_KEY"
-ENV_AUTH_TOKEN = "ANTHROPIC_AUTH_TOKEN"
-
 _DESCRIPTION = "Describe what you want; prompter runs the shell commands."
 _EXIT_WORDS = {"exit", "quit", ":q"}
-_MISSING_KEY_NOTE = (
-    "Note: no ANTHROPIC_API_KEY set; relying on a saved "
-    "Anthropic login if you have one."
+_MISSING_KEY_TEMPLATE = (
+    "Note: {env} is not set; relying on a saved login if your provider has one."
 )
-_CLIENT_INIT_ERROR = "Could not initialize the Anthropic client: {error}"
 
 _HELP_PROMPT = "What you want done."
-_HELP_MODEL = f"Model override (config 'model', else {DEFAULT_MODEL})."
+_HELP_PROVIDER = "Model provider this run (anthropic, openai, gemini)."
+_HELP_MODEL = "Model override (config 'model', else the provider default)."
+_HELP_BASE_URL = "OpenAI-compatible base URL (e.g. Groq, OpenRouter)."
 _HELP_WORKSPACE = "Override the default project workspace this run."
 _HELP_MAX_FIX = "Max commands that may fail in a row before stopping."
 _HELP_ASK_ALL = "Confirm every command, even safe ones."
 _HELP_YOLO = "Run everything without confirmation (dangerous)."
 _HELP_CONFIG = "Print the config file path and exit."
 
-_ARG_PROMPT = "prompt"
-_FLAG_MODEL = "--model"
-_FLAG_WORKSPACE = "--workspace"
-_FLAG_MAX_FIX = "--max-fix"
-_FLAG_ASK_ALL = "--ask-all"
-_FLAG_YOLO = "--yolo"
-_FLAG_CONFIG = "--config"
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=PROGRAM_NAME, description=_DESCRIPTION)
-    parser.add_argument(_ARG_PROMPT, nargs="*", help=_HELP_PROMPT)
-    parser.add_argument(_FLAG_MODEL, default=None, help=_HELP_MODEL)
-    parser.add_argument(_FLAG_WORKSPACE, help=_HELP_WORKSPACE)
-    parser.add_argument(_FLAG_MAX_FIX, type=int, default=None, help=_HELP_MAX_FIX)
-    parser.add_argument(_FLAG_ASK_ALL, action="store_true", help=_HELP_ASK_ALL)
-    parser.add_argument(_FLAG_YOLO, action="store_true", help=_HELP_YOLO)
-    parser.add_argument(_FLAG_CONFIG, action="store_true", help=_HELP_CONFIG)
+    parser.add_argument("prompt", nargs="*", help=_HELP_PROMPT)
+    parser.add_argument("--provider", help=_HELP_PROVIDER)
+    parser.add_argument("--model", default=None, help=_HELP_MODEL)
+    parser.add_argument("--base-url", help=_HELP_BASE_URL)
+    parser.add_argument("--workspace", help=_HELP_WORKSPACE)
+    parser.add_argument("--max-fix", type=int, default=None, help=_HELP_MAX_FIX)
+    parser.add_argument("--ask-all", action="store_true", help=_HELP_ASK_ALL)
+    parser.add_argument("--yolo", action="store_true", help=_HELP_YOLO)
+    parser.add_argument("--config", action="store_true", help=_HELP_CONFIG)
     return parser
 
 
 def _apply_overrides(args, config: Config) -> None:
-    """CLI flags override config values for this run."""
+    """CLI flags override config values for this run; resolve the model."""
+    if args.provider:
+        config.provider = args.provider
+    if args.base_url:
+        config.base_url = args.base_url
     if args.workspace:
         config.default_workspace = args.workspace
     if args.max_fix is not None:
         config.max_fix_attempts = args.max_fix
-    config.model = args.model or config.model or DEFAULT_MODEL
+    config.model = args.model or config.model or default_model_for(config.provider)
 
 
 def _resolve_mode(args, config: Config) -> ApprovalMode:
@@ -89,20 +75,16 @@ def _resolve_mode(args, config: Config) -> ApprovalMode:
     return ApprovalMode.SMART
 
 
-def build_client():
-    try:
-        return anthropic.Anthropic()
-    except Exception as e:
-        sys.exit(_CLIENT_INIT_ERROR.format(error=e))
-
-
 def make_agent(args, config: Config, console: Console) -> Agent:
-    if not (os.environ.get(ENV_API_KEY) or os.environ.get(ENV_AUTH_TOKEN)):
-        console.note(_MISSING_KEY_NOTE)
     _apply_overrides(args, config)
+    if config.key_env and not os.environ.get(config.key_env):
+        console.note(_MISSING_KEY_TEMPLATE.format(env=config.key_env))
     mode = _resolve_mode(args, config)
-    client = ClaudeClient(build_client(), config.model)
-    return Agent(client, Shell(), console, config, mode)
+    try:
+        provider = create_provider(config)
+    except ProviderError as e:
+        sys.exit(str(e))
+    return Agent(provider, Shell(), console, config, mode)
 
 
 def _handle_interrupt(console: Console, _exc: BaseException) -> int:
@@ -122,8 +104,8 @@ def _handle_api(console: Console, exc: BaseException) -> int:
 
 _ERROR_HANDLERS = [
     ((KeyboardInterrupt, QuitRequested), _handle_interrupt),
-    (anthropic.AuthenticationError, _handle_auth),
-    (anthropic.APIError, _handle_api),
+    (ProviderAuthError, _handle_auth),
+    (ProviderError, _handle_api),
 ]
 
 

@@ -1,36 +1,24 @@
 """Fakes and factories shared across the test modules.
 
-These stand in for the collaborators the agent has injected — a model client, a
-shell, and response blocks — so the loop can be exercised without a network,
-an API key, or a real subprocess.
+These stand in for the collaborators the agent has injected — a model provider
+and a shell — so the loop can be exercised without a network, an API key, or a
+real subprocess.
 """
 
 from __future__ import annotations
 
-import types
-
+from prompter.providers.base import AssistantTurn, ToolInvocation
 from prompter.shell import CommandResult
 
 
-def text_block(text: str = "hi"):
-    return types.SimpleNamespace(type="text", text=text)
+def make_call(command: str = "ls -la", explanation: str = "list",
+              interactive: bool = False, call_id: str = "c1") -> ToolInvocation:
+    return ToolInvocation(call_id=call_id, command=command,
+                          explanation=explanation, interactive=interactive)
 
 
-def tool_use_block(command: str = "ls -la", explanation: str = "list",
-                   interactive: bool = False, block_id: str = "t1"):
-    return types.SimpleNamespace(
-        type="tool_use",
-        id=block_id,
-        input={
-            "command": command,
-            "explanation": explanation,
-            "interactive": interactive,
-        },
-    )
-
-
-def final_message(stop_reason: str, content: list):
-    return types.SimpleNamespace(stop_reason=stop_reason, content=content)
+def make_turn(text: str = "", calls: list | None = None) -> AssistantTurn:
+    return AssistantTurn(text, list(calls or []))
 
 
 class FakeShell:
@@ -48,27 +36,33 @@ class FakeShell:
         return CommandResult(0, "ok", "", False)
 
 
-class ScriptedClaude:
-    """Returns queued final messages; records disable_tools per call."""
+class FakeProvider:
+    """Returns queued AssistantTurns; records the disable_tools flag per call."""
 
-    def __init__(self, responses: list):
-        self._responses = list(responses)
+    name = "fake"
+    model = "fake-model"
+
+    def __init__(self, turns: list):
+        self._turns = list(turns)
         self.disable_tools_log: list[bool] = []
 
-    def stream(self, messages, system_blocks, disable_tools, on_text):
+    def complete(self, _history, _system_texts, disable_tools, _on_text) -> AssistantTurn:
         self.disable_tools_log.append(disable_tools)
-        return self._responses.pop(0)
+        return self._turns.pop(0)
 
 
-class LoopingClaude:
+class LoopingProvider:
     """Proposes a failing command each round until tools are disabled."""
+
+    name = "fake"
+    model = "fake-model"
 
     def __init__(self, command: str = "false"):
         self._command = command
         self.disable_tools_log: list[bool] = []
 
-    def stream(self, messages, system_blocks, disable_tools, on_text):
+    def complete(self, _history, _system_texts, disable_tools, _on_text) -> AssistantTurn:
         self.disable_tools_log.append(disable_tools)
         if disable_tools:
-            return final_message("end_turn", [text_block("(summary)")])
-        return final_message("tool_use", [tool_use_block(self._command)])
+            return make_turn(text="(summary)")
+        return make_turn(calls=[make_call(self._command)])

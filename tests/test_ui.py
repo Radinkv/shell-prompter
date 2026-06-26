@@ -49,11 +49,12 @@ def test_confirm_eof_is_quit(console, monkeypatch):
 
 
 def test_banner_contents(console, capsys):
-    console.banner(Config(model="claude-opus-4-8"), ApprovalMode.SMART)
+    console.banner(Config(provider="anthropic", model="claude-opus-4-8"),
+                   ApprovalMode.SMART)
     out = capsys.readouterr().out
     assert "prompter" in out
     assert "mode=smart" in out
-    assert "claude-opus-4-8" in out
+    assert "anthropic/claude-opus-4-8" in out
 
 
 def test_banner_yolo_warning(console, capsys):
