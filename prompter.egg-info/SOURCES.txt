@@ -1,9 +1,0 @@
-README.md
-prompter.py
-pyproject.toml
-prompter.egg-info/PKG-INFO
-prompter.egg-info/SOURCES.txt
-prompter.egg-info/dependency_links.txt
-prompter.egg-info/entry_points.txt
-prompter.egg-info/requires.txt
-prompter.egg-info/top_level.txt
