@@ -8,6 +8,9 @@ build/
 dist/
 .eggs/
 
+# Test cache
+.pytest_cache/
+
 # Virtual environments
 .venv/
 venv/

@@ -139,7 +139,8 @@ prompter/
   agent.py       Agent, Conversation — the orchestration loop only
   cli.py         argument parsing, wiring, main()
 tests/
-  test_offline.py   no-network checks (run: python tests/test_offline.py)
+  conftest.py, _helpers.py   fixtures + fakes (FakeShell, ScriptedClaude, ...)
+  test_*.py                  one unit-test module per package module
 ```
 
 The split follows a state boundary: stateful pieces (`Shell`, `Agent`,
@@ -147,6 +148,17 @@ The split follows a state boundary: stateful pieces (`Shell`, `Agent`,
 transforms (`classify`, `truncate`, config loading, context building) are plain
 functions. `Agent` orchestrates its collaborators and does no I/O or API calls
 itself, which is what makes it testable with a fake client + console.
+
+## Tests
+
+```bash
+pip install -e ".[dev]"   # installs pytest
+pytest                    # ~95 unit tests, no network or API key needed
+```
+
+The agent loop is tested by injecting fakes for its collaborators (a scripted
+model client, a recording shell, a mock console), so the full
+stream → gate → run → repeat cycle is exercised offline.
 
 ## Safety notes
 
