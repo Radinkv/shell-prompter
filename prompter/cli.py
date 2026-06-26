@@ -16,18 +16,24 @@ except ImportError:
     )
 
 from .agent import Agent, QuitRequested
-from .config import ApprovalMode, CONFIG_PATH, Config, load_config
-from .constants import (
+from .config import (
+    ApprovalMode,
+    CONFIG_PATH,
+    Config,
     DEFAULT_MODEL,
-    ENV_API_KEY,
-    ENV_AUTH_TOKEN,
-    ERROR_EXIT_CODE,
-    OK_EXIT_CODE,
-    SIGINT_EXIT_CODE,
+    PROGRAM_NAME,
+    load_config,
 )
 from .llm import ClaudeClient
 from .shell import Shell
 from .ui import Console
+
+OK_EXIT_CODE = 0
+ERROR_EXIT_CODE = 1
+SIGINT_EXIT_CODE = 130
+
+ENV_API_KEY = "ANTHROPIC_API_KEY"
+ENV_AUTH_TOKEN = "ANTHROPIC_AUTH_TOKEN"
 
 _DESCRIPTION = "Describe what you want; prompter runs the shell commands."
 _EXIT_WORDS = {"exit", "quit", ":q"}
@@ -35,23 +41,34 @@ _MISSING_KEY_NOTE = (
     "Note: no ANTHROPIC_API_KEY set; relying on a saved "
     "Anthropic login if you have one."
 )
+_CLIENT_INIT_ERROR = "Could not initialize the Anthropic client: {error}"
+
+_HELP_PROMPT = "What you want done."
+_HELP_MODEL = f"Model override (config 'model', else {DEFAULT_MODEL})."
+_HELP_WORKSPACE = "Override the default project workspace this run."
+_HELP_MAX_FIX = "Max commands that may fail in a row before stopping."
+_HELP_ASK_ALL = "Confirm every command, even safe ones."
+_HELP_YOLO = "Run everything without confirmation (dangerous)."
+_HELP_CONFIG = "Print the config file path and exit."
+
+_ARG_PROMPT = "prompt"
+_FLAG_MODEL = "--model"
+_FLAG_WORKSPACE = "--workspace"
+_FLAG_MAX_FIX = "--max-fix"
+_FLAG_ASK_ALL = "--ask-all"
+_FLAG_YOLO = "--yolo"
+_FLAG_CONFIG = "--config"
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="prompter", description=_DESCRIPTION)
-    parser.add_argument("prompt", nargs="*", help="What you want done.")
-    parser.add_argument("--model", default=None,
-                        help=f"Model override (config 'model', else {DEFAULT_MODEL}).")
-    parser.add_argument("--workspace",
-                        help="Override the default project workspace this run.")
-    parser.add_argument("--max-fix", type=int, default=None,
-                        help="Max commands that may fail in a row before stopping.")
-    parser.add_argument("--ask-all", action="store_true",
-                        help="Confirm every command, even safe ones.")
-    parser.add_argument("--yolo", action="store_true",
-                        help="Run everything without confirmation (dangerous).")
-    parser.add_argument("--config", action="store_true",
-                        help="Print the config file path and exit.")
+    parser = argparse.ArgumentParser(prog=PROGRAM_NAME, description=_DESCRIPTION)
+    parser.add_argument(_ARG_PROMPT, nargs="*", help=_HELP_PROMPT)
+    parser.add_argument(_FLAG_MODEL, default=None, help=_HELP_MODEL)
+    parser.add_argument(_FLAG_WORKSPACE, help=_HELP_WORKSPACE)
+    parser.add_argument(_FLAG_MAX_FIX, type=int, default=None, help=_HELP_MAX_FIX)
+    parser.add_argument(_FLAG_ASK_ALL, action="store_true", help=_HELP_ASK_ALL)
+    parser.add_argument(_FLAG_YOLO, action="store_true", help=_HELP_YOLO)
+    parser.add_argument(_FLAG_CONFIG, action="store_true", help=_HELP_CONFIG)
     return parser
 
 
@@ -76,7 +93,7 @@ def build_client():
     try:
         return anthropic.Anthropic()
     except Exception as e:
-        sys.exit(f"Could not initialize the Anthropic client: {e}")
+        sys.exit(_CLIENT_INIT_ERROR.format(error=e))
 
 
 def make_agent(args, config: Config, console: Console) -> Agent:
@@ -88,26 +105,47 @@ def make_agent(args, config: Config, console: Console) -> Agent:
     return Agent(client, Shell(), console, config, mode)
 
 
+def _handle_interrupt(console: Console, _exc: BaseException) -> int:
+    console.stopped()
+    return SIGINT_EXIT_CODE
+
+
+def _handle_auth(console: Console, _exc: BaseException) -> int:
+    console.auth_error()
+    return ERROR_EXIT_CODE
+
+
+def _handle_api(console: Console, exc: BaseException) -> int:
+    console.api_error(exc)
+    return ERROR_EXIT_CODE
+
+
+_ERROR_HANDLERS = [
+    ((KeyboardInterrupt, QuitRequested), _handle_interrupt),
+    (anthropic.AuthenticationError, _handle_auth),
+    (anthropic.APIError, _handle_api),
+]
+
+
+def _dispatch(agent: Agent, console: Console, goal: str) -> None:
+    if goal:
+        agent.run_turn(goal)
+    else:
+        _repl(agent, console)
+
+
 def run(args, console: Console) -> int:
     config = load_config()
     agent = make_agent(args, config, console)
     console.banner(config, agent.mode)
-
     goal = " ".join(args.prompt).strip()
     try:
-        if goal:
-            agent.run_turn(goal)
-        else:
-            _repl(agent, console)
-    except (KeyboardInterrupt, QuitRequested):
-        console.stopped()
-        return SIGINT_EXIT_CODE
-    except anthropic.AuthenticationError:
-        console.auth_error()
-        return ERROR_EXIT_CODE
-    except anthropic.APIError as e:
-        console.api_error(e)
-        return ERROR_EXIT_CODE
+        _dispatch(agent, console, goal)
+    except BaseException as exc:
+        for exc_types, handler in _ERROR_HANDLERS:
+            if isinstance(exc, exc_types):
+                return handler(console, exc)
+        raise
     return OK_EXIT_CODE
 
 

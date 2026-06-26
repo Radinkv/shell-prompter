@@ -1,9 +1,9 @@
 """Everything we send to Claude: the tool schema, system prompt, per-turn
 environment context, and a thin streaming client wrapper.
 
-The wrapper keeps the Anthropic-specific request shape in one place and reports
-streamed text through an ``on_text`` callback, so the agent never touches API
-field names or printing directly.
+The wrapper keeps the Anthropic request shape in one place and reports streamed
+text through an ``on_text`` callback, so the agent never touches API field names
+or printing directly.
 """
 
 from __future__ import annotations
@@ -14,46 +14,65 @@ from typing import Callable
 
 from .config import Config
 from .constants import (
-    BLOCK_TEXT,
     DELTA_TEXT,
-    ENV_SHELL,
     EVENT_CONTENT_BLOCK_DELTA,
+    FIELD_TEXT,
+    FIELD_TYPE,
     INPUT_COMMAND,
     INPUT_EXPLANATION,
     INPUT_INTERACTIVE,
-    MAX_TOKENS,
+    BLOCK_TEXT,
     THINKING_ADAPTIVE,
     TOOL_CHOICE_NONE,
     TOOL_NAME_RUN_COMMAND,
 )
 
+MAX_TOKENS = 8000
+ENV_SHELL = "SHELL"
+
+_TOOL_DESCRIPTION = (
+    "Run a single shell command in the user's terminal session. The working "
+    "directory persists between calls (so `cd` works as expected). Use one "
+    "command per call and build up to the goal step by step. Set `interactive` "
+    "to true for programs that take over the terminal and need the user to type "
+    "into them (claude, vim, ssh, a REPL, etc.) — their output is shown to the "
+    "user directly and not returned to you."
+)
+_DESC_COMMAND = "The exact shell command to run."
+_DESC_EXPLANATION = "One short sentence on what this does and why."
+_DESC_INTERACTIVE = "True if the program needs an interactive terminal."
+
+_SCHEMA_TYPE = "type"
+_SCHEMA_OBJECT = "object"
+_SCHEMA_STRING = "string"
+_SCHEMA_BOOLEAN = "boolean"
+_SCHEMA_DESCRIPTION = "description"
+_SCHEMA_PROPERTIES = "properties"
+_SCHEMA_REQUIRED = "required"
+_TOOL_KEY_NAME = "name"
+_TOOL_KEY_DESCRIPTION = "description"
+_TOOL_KEY_INPUT_SCHEMA = "input_schema"
+
+
+def _string_property(description: str) -> dict:
+    return {_SCHEMA_TYPE: _SCHEMA_STRING, _SCHEMA_DESCRIPTION: description}
+
+
+def _boolean_property(description: str) -> dict:
+    return {_SCHEMA_TYPE: _SCHEMA_BOOLEAN, _SCHEMA_DESCRIPTION: description}
+
+
 RUN_TOOL = {
-    "name": TOOL_NAME_RUN_COMMAND,
-    "description": (
-        "Run a single shell command in the user's terminal session. The "
-        "working directory persists between calls (so `cd` works as expected). "
-        "Use one command per call and build up to the goal step by step. Set "
-        "`interactive` to true for programs that take over the terminal and "
-        "need the user to type into them (claude, vim, ssh, a REPL, etc.) — "
-        "their output is shown to the user directly and not returned to you."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            INPUT_COMMAND: {
-                "type": "string",
-                "description": "The exact shell command to run.",
-            },
-            INPUT_EXPLANATION: {
-                "type": "string",
-                "description": "One short sentence on what this does and why.",
-            },
-            INPUT_INTERACTIVE: {
-                "type": "boolean",
-                "description": "True if the program needs an interactive terminal.",
-            },
+    _TOOL_KEY_NAME: TOOL_NAME_RUN_COMMAND,
+    _TOOL_KEY_DESCRIPTION: _TOOL_DESCRIPTION,
+    _TOOL_KEY_INPUT_SCHEMA: {
+        _SCHEMA_TYPE: _SCHEMA_OBJECT,
+        _SCHEMA_PROPERTIES: {
+            INPUT_COMMAND: _string_property(_DESC_COMMAND),
+            INPUT_EXPLANATION: _string_property(_DESC_EXPLANATION),
+            INPUT_INTERACTIVE: _boolean_property(_DESC_INTERACTIVE),
         },
-        "required": [INPUT_COMMAND, INPUT_EXPLANATION],
+        _SCHEMA_REQUIRED: [INPUT_COMMAND, INPUT_EXPLANATION],
     },
 }
 
@@ -88,28 +107,40 @@ comes back as "declined by user" — adapt and propose an alternative or ask.
 summary at the end is plenty; the user can see the commands and their output.
 - When the goal is achieved, say so concisely and stop calling tools."""
 
+_UNKNOWN_SHELL = "unknown"
 _NO_PREFERENCES = "(none)"
+_PREFERENCE_LINE = "- {item}"
+_ENVIRONMENT_TEMPLATE = (
+    "[environment] os={system} ({release}); shell={shell}; "
+    "cwd={cwd}; home={home}\n"
+    "[default workspace] {workspace}  (use for new projects when the user "
+    "doesn't say where; mkdir -p it if missing)\n"
+    "[user preferences]\n{preferences}"
+)
 
 
 def build_environment_context(config: Config, cwd: str) -> str:
     """The per-turn context block: OS, shell, cwd, workspace, preferences."""
     prefs = config.preferences or []
-    prefs_text = "\n".join(f"- {p}" for p in prefs) if prefs else _NO_PREFERENCES
-    return (
-        f"[environment] os={platform.system()} ({platform.release()}); "
-        f"shell={os.environ.get(ENV_SHELL, 'unknown')}; "
-        f"cwd={cwd}; home={os.path.expanduser('~')}\n"
-        f"[default workspace] {config.workspace_path}  "
-        f"(use for new projects when the user doesn't say where; "
-        f"mkdir -p it if missing)\n"
-        f"[user preferences]\n{prefs_text}"
+    prefs_text = (
+        "\n".join(_PREFERENCE_LINE.format(item=p) for p in prefs)
+        if prefs else _NO_PREFERENCES
+    )
+    return _ENVIRONMENT_TEMPLATE.format(
+        system=platform.system(),
+        release=platform.release(),
+        shell=os.environ.get(ENV_SHELL, _UNKNOWN_SHELL),
+        cwd=cwd,
+        home=os.path.expanduser("~"),
+        workspace=config.workspace_path,
+        preferences=prefs_text,
     )
 
 
 def build_system_blocks(context: str) -> list[dict]:
     return [
-        {"type": BLOCK_TEXT, "text": SYSTEM_PROMPT},
-        {"type": BLOCK_TEXT, "text": context},
+        {FIELD_TYPE: BLOCK_TEXT, FIELD_TEXT: SYSTEM_PROMPT},
+        {FIELD_TYPE: BLOCK_TEXT, FIELD_TEXT: context},
     ]
 
 

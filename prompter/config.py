@@ -1,5 +1,5 @@
-"""User config (``~/.prompter/config.json``): the Config dataclass, defaults,
-and approval modes.
+"""User config (``~/.prompter/config.json``): the Config dataclass, app
+defaults, and approval modes.
 
 So you can say ``prompter "make a project called hunchday and run claude"`` and
 it creates ``~/Code/hunchday`` instead of dumping it in the current directory.
@@ -16,15 +16,19 @@ from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 
 from .colors import palette
-from .constants import DEFAULT_MAX_FIX_ATTEMPTS, DEFAULT_MODEL
 
-CONFIG_PATH = os.path.expanduser("~/.prompter/config.json")
-
+PROGRAM_NAME = "prompter"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_WORKSPACE = "~/Code"
+DEFAULT_MAX_FIX_ATTEMPTS = 3
 DEFAULT_PREFERENCES = [
     "When compiling C++, prefer clang++ with -std=c++17, "
     "and fall back to g++ if clang++ isn't available.",
 ]
+
+CONFIG_PATH = os.path.expanduser("~/.prompter/config.json")
+_JSON_INDENT = 2
+_READ_FAILURE_WARNING = "Warning: couldn't read {path} ({error}); using defaults."
 
 
 class ApprovalMode(Enum):
@@ -66,8 +70,8 @@ def load_config() -> Config:
         with open(CONFIG_PATH) as f:
             return Config.from_dict(json.load(f))
     except (OSError, ValueError) as e:
-        print(f"{palette.YELLOW}Warning: couldn't read {CONFIG_PATH} ({e}); "
-              f"using defaults.{palette.RESET}", file=sys.stderr)
+        warning = _READ_FAILURE_WARNING.format(path=CONFIG_PATH, error=e)
+        print(f"{palette.YELLOW}{warning}{palette.RESET}", file=sys.stderr)
         return Config()
 
 
@@ -75,5 +79,5 @@ def _write_default_config() -> Config:
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
     config = Config()
     with open(CONFIG_PATH, "w") as f:
-        json.dump(config.to_dict(), f, indent=2)
+        json.dump(config.to_dict(), f, indent=_JSON_INDENT)
     return config

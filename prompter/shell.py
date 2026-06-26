@@ -14,16 +14,14 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 
-from .constants import (
-    COMMAND_TIMEOUT_SECONDS,
-    CWD_SENTINEL,
-    MAX_OUTPUT_CHARS,
-    TIMEOUT_EXIT_CODE,
-)
+COMMAND_TIMEOUT_SECONDS = 600
+TIMEOUT_EXIT_CODE = 124
+MAX_OUTPUT_CHARS = 20000
 
 BASH = "bash"
 BASH_COMMAND_FLAG = "-c"
 
+_CWD_SENTINEL = "__PROMPTER_CWD_a3f9__:"
 _CAPTURE_TEMPLATE = (
     "cd {cwd} 2>/dev/null\n"
     "{command}\n"
@@ -37,6 +35,7 @@ _TIMEOUT_MESSAGE = (
     f"Command timed out after {COMMAND_TIMEOUT_SECONDS}s and was killed."
 )
 _INTERACTIVE_STDOUT = "(interactive program — output shown directly above)"
+_OMITTED_TEMPLATE = "{head}\n... [{count} characters omitted] ...\n{tail}"
 
 _INTERACTIVE_COMMANDS = re.compile(
     r"^\s*(claude|vim|nvim|vi|nano|emacs|less|more|top|htop|ssh|tmux|screen|"
@@ -53,10 +52,10 @@ def truncate(text: str) -> str:
     """Cap output handed back to the model, keeping head and tail."""
     if len(text) <= MAX_OUTPUT_CHARS:
         return text
-    head = text[: MAX_OUTPUT_CHARS // 2]
-    tail = text[-MAX_OUTPUT_CHARS // 2:]
-    omitted = len(text) - MAX_OUTPUT_CHARS
-    return f"{head}\n... [{omitted} characters omitted] ...\n{tail}"
+    half = MAX_OUTPUT_CHARS // 2
+    return _OMITTED_TEMPLATE.format(
+        head=text[:half], tail=text[-half:], count=len(text) - MAX_OUTPUT_CHARS
+    )
 
 
 @dataclass
@@ -84,7 +83,7 @@ class Shell:
         script = _CAPTURE_TEMPLATE.format(
             cwd=shlex.quote(self.cwd),
             command=command,
-            sentinel=CWD_SENTINEL,
+            sentinel=_CWD_SENTINEL,
         )
         try:
             proc = subprocess.run(
@@ -113,8 +112,8 @@ class Shell:
         changed = False
         kept = []
         for line in stdout.splitlines():
-            if line.startswith(CWD_SENTINEL):
-                new_cwd = line[len(CWD_SENTINEL):].strip()
+            if line.startswith(_CWD_SENTINEL):
+                new_cwd = line[len(_CWD_SENTINEL):].strip()
                 if new_cwd and new_cwd != self.cwd and os.path.isdir(new_cwd):
                     self.cwd = new_cwd
                     changed = True

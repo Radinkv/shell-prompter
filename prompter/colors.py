@@ -5,7 +5,17 @@ from __future__ import annotations
 import os
 import sys
 
-from .constants import ENV_NO_COLOR
+ENV_NO_COLOR = "NO_COLOR"
+
+_RESET = "\033[0m"
+_BOLD = "\033[1m"
+_DIM = "\033[2m"
+_RED = "\033[31m"
+_GREEN = "\033[32m"
+_YELLOW = "\033[33m"
+_BLUE = "\033[34m"
+_MAGENTA = "\033[35m"
+_CYAN = "\033[36m"
 
 
 def supports_color() -> bool:
@@ -21,15 +31,15 @@ class Palette:
         def pick(code: str) -> str:
             return code if active else ""
 
-        self.RESET = pick("\033[0m")
-        self.BOLD = pick("\033[1m")
-        self.DIM = pick("\033[2m")
-        self.RED = pick("\033[31m")
-        self.GREEN = pick("\033[32m")
-        self.YELLOW = pick("\033[33m")
-        self.BLUE = pick("\033[34m")
-        self.MAGENTA = pick("\033[35m")
-        self.CYAN = pick("\033[36m")
+        self.RESET = pick(_RESET)
+        self.BOLD = pick(_BOLD)
+        self.DIM = pick(_DIM)
+        self.RED = pick(_RED)
+        self.GREEN = pick(_GREEN)
+        self.YELLOW = pick(_YELLOW)
+        self.BLUE = pick(_BLUE)
+        self.MAGENTA = pick(_MAGENTA)
+        self.CYAN = pick(_CYAN)
 
 
 palette = Palette()

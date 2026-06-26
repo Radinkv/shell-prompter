@@ -14,6 +14,12 @@ from .constants import (
     BLOCK_TEXT,
     BLOCK_TOOL_RESULT,
     BLOCK_TOOL_USE,
+    FIELD_CONTENT,
+    FIELD_IS_ERROR,
+    FIELD_ROLE,
+    FIELD_TEXT,
+    FIELD_TOOL_USE_ID,
+    FIELD_TYPE,
     INPUT_COMMAND,
     INPUT_EXPLANATION,
     INPUT_INTERACTIVE,
@@ -22,13 +28,24 @@ from .constants import (
     STOP_REASON_TOOL_USE,
 )
 from .llm import ClaudeClient, build_environment_context, build_system_blocks
-from .risk import RiskTier, classify
+from .risk import RiskAssessment, RiskTier, classify
 from .shell import CommandResult, Shell, looks_interactive
 from .ui import Console, Decision
 
 _DECLINED_MESSAGE = (
     "User declined to run this command. "
     "Suggest an alternative or ask what they'd prefer."
+)
+_FORCE_STOP_TEMPLATE = (
+    "[prompter] {count} commands have failed in a row, reaching the "
+    "max_fix_attempts limit ({limit}). Stop running commands now. Briefly "
+    "explain what's going wrong and what the user could try."
+)
+_PAYLOAD_TEMPLATE = (
+    "exit_code: {exit_code}\n"
+    "cwd: {cwd}\n"
+    "stdout:\n{stdout}\n"
+    "stderr:\n{stderr}"
 )
 
 
@@ -73,19 +90,26 @@ class Conversation:
         self.messages: list[dict] = []
 
     def add_user_text(self, text: str) -> None:
-        self.messages.append({"role": ROLE_USER, "content": text})
+        self.messages.append({FIELD_ROLE: ROLE_USER, FIELD_CONTENT: text})
 
     def add_assistant(self, content) -> None:
-        self.messages.append({"role": ROLE_ASSISTANT, "content": content})
+        self.messages.append({FIELD_ROLE: ROLE_ASSISTANT, FIELD_CONTENT: content})
 
     def add_user_blocks(self, blocks: list[dict]) -> None:
-        self.messages.append({"role": ROLE_USER, "content": blocks})
+        self.messages.append({FIELD_ROLE: ROLE_USER, FIELD_CONTENT: blocks})
 
 
-def _force_stop_message(count: int, limit: int) -> str:
-    return (f"[prompter] {count} commands have failed in a row, reaching the "
-            f"max_fix_attempts limit ({limit}). Stop running commands now. "
-            f"Briefly explain what's going wrong and what the user could try.")
+def _tool_result_block(tool_use_id: str, outcome: "ToolOutcome") -> dict:
+    return {
+        FIELD_TYPE: BLOCK_TOOL_RESULT,
+        FIELD_TOOL_USE_ID: tool_use_id,
+        FIELD_CONTENT: outcome.text,
+        FIELD_IS_ERROR: outcome.is_error,
+    }
+
+
+def _text_block(text: str) -> dict:
+    return {FIELD_TYPE: BLOCK_TEXT, FIELD_TEXT: text}
 
 
 class Agent:
@@ -142,12 +166,7 @@ class Agent:
             self.consecutive_failures = (
                 self.consecutive_failures + 1 if outcome.is_failure else 0
             )
-            results.append({
-                "type": BLOCK_TOOL_RESULT,
-                "tool_use_id": block.id,
-                "content": outcome.text,
-                "is_error": outcome.is_error,
-            })
+            results.append(_tool_result_block(block.id, outcome))
         return results
 
     def _maybe_force_stop(self, results: list[dict]) -> None:
@@ -155,10 +174,8 @@ class Agent:
         limit = self.config.max_fix_attempts
         if self.consecutive_failures < limit or self._force_stop:
             return
-        results.append({
-            "type": BLOCK_TEXT,
-            "text": _force_stop_message(self.consecutive_failures, limit),
-        })
+        results.append(_text_block(_FORCE_STOP_TEMPLATE.format(
+            count=self.consecutive_failures, limit=limit)))
         self._force_stop = True
         self.console.force_stop_notice(limit)
 
@@ -179,7 +196,7 @@ class Agent:
         )
 
     def _authorize(self, request: CommandRequest,
-                   assessment) -> bool:
+                   assessment: RiskAssessment) -> bool:
         if self._auto_approves(assessment.tier):
             self.console.auto_run(assessment, request.command)
             return True
@@ -202,7 +219,9 @@ class Agent:
         return tier == RiskTier.SAFE
 
     def _format_payload(self, result: CommandResult) -> str:
-        return (f"exit_code: {result.exit_code}\n"
-                f"cwd: {self.shell.cwd}\n"
-                f"stdout:\n{result.stdout}\n"
-                f"stderr:\n{result.stderr}")
+        return _PAYLOAD_TEMPLATE.format(
+            exit_code=result.exit_code,
+            cwd=self.shell.cwd,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )

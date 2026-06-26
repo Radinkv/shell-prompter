@@ -1,8 +1,9 @@
 """Risk classification: grade each proposed command safe / confirm / danger.
 
 The tier decides whether prompter runs a command automatically or asks first.
-Rules are checked danger-first so e.g. ``sudo rm -rf`` lands in danger, not
-confirm; the first matching rule wins.
+RISK_REGISTRY lists the tiers in precedence order so the loop in classify() is
+trivial and the precedence lives in data, not control flow; the first matching
+rule wins (danger before confirm).
 """
 
 from __future__ import annotations
@@ -12,6 +13,12 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .colors import Palette
+
+_COLOR_GREEN = "GREEN"
+_COLOR_YELLOW = "YELLOW"
+_COLOR_RED = "RED"
+
+SAFE_REASON = "read-only or clearly reversible"
 
 
 class RiskTier(Enum):
@@ -28,9 +35,9 @@ class RiskTier(Enum):
 
 
 _TIER_COLOR_ATTR = {
-    RiskTier.SAFE: "GREEN",
-    RiskTier.CONFIRM: "YELLOW",
-    RiskTier.DANGER: "RED",
+    RiskTier.SAFE: _COLOR_GREEN,
+    RiskTier.CONFIRM: _COLOR_YELLOW,
+    RiskTier.DANGER: _COLOR_RED,
 }
 
 
@@ -88,15 +95,16 @@ CONFIRM_RULES = [
     _rule(r">\s*[^|&\s]", "redirects output into a file (may overwrite)"),
 ]
 
-SAFE_REASON = "read-only or clearly reversible"
+RISK_REGISTRY = [
+    (RiskTier.DANGER, DANGER_RULES),
+    (RiskTier.CONFIRM, CONFIRM_RULES),
+]
 
 
 def classify(command: str) -> RiskAssessment:
     """Grade a command into its risk tier with a short reason."""
-    for rule in DANGER_RULES:
-        if rule.pattern.search(command):
-            return RiskAssessment(RiskTier.DANGER, rule.reason)
-    for rule in CONFIRM_RULES:
-        if rule.pattern.search(command):
-            return RiskAssessment(RiskTier.CONFIRM, rule.reason)
+    for tier, rules in RISK_REGISTRY:
+        for rule in rules:
+            if rule.pattern.search(command):
+                return RiskAssessment(tier, rule.reason)
     return RiskAssessment(RiskTier.SAFE, SAFE_REASON)
