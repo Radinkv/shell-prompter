@@ -40,7 +40,7 @@ def test_apply_overrides_provider_changes_default_model():
     cfg = Config()
     cli._apply_overrides(args, cfg)
     assert cfg.provider == "openai"
-    assert cfg.model == "gpt-5"
+    assert cfg.model == "gpt-5.4"
 
 
 def test_apply_overrides_model_flag_wins():

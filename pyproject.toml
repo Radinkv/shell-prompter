@@ -1,9 +1,20 @@
 [project]
-name = "prompter"
+name = "shell-prompter"
 version = "0.1.0"
-description = "A natural-language shell agent powered by Claude."
+description = "A natural-language shell agent powered by Claude, OpenAI, or Gemini."
 readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "radinkv", email = "khashei@gmail.com" }]
+keywords = ["cli", "shell", "ai", "agent", "llm", "anthropic", "openai", "gemini"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
 dependencies = [
     "anthropic>=0.40",
 ]
@@ -12,7 +23,12 @@ dependencies = [
 openai = ["openai>=1.0"]
 gemini = ["google-genai>=0.3"]
 all = ["openai>=1.0", "google-genai>=0.3"]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "build>=1.0", "twine>=5.0"]
+
+[project.urls]
+# Edit these to your repository before publishing.
+Homepage = "https://github.com/radinkv/shell-prompter"
+Repository = "https://github.com/radinkv/shell-prompter"
 
 [project.scripts]
 prompter = "prompter.cli:main"
@@ -22,7 +38,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["prompter"]
+packages = ["prompter", "prompter.providers"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

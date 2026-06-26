@@ -47,6 +47,45 @@ COMMAND_DESCRIPTION = "The exact shell command to run."
 EXPLANATION_DESCRIPTION = "One short sentence on what this does and why."
 INTERACTIVE_DESCRIPTION = "True if the program needs an interactive terminal."
 
+# -- shared JSON-Schema for the tool parameters ------------------------------
+# Anthropic's input_schema and OpenAI's function.parameters are both standard
+# JSON Schema, so the parameter shape is defined exactly once here. Gemini uses
+# its own typed Schema objects and builds them locally.
+JSON_SCHEMA_TYPE = "type"
+JSON_SCHEMA_OBJECT = "object"
+JSON_SCHEMA_STRING = "string"
+JSON_SCHEMA_BOOLEAN = "boolean"
+JSON_SCHEMA_DESCRIPTION = "description"
+JSON_SCHEMA_PROPERTIES = "properties"
+JSON_SCHEMA_REQUIRED = "required"
+
+
+def _string_property(description: str) -> dict:
+    return {JSON_SCHEMA_TYPE: JSON_SCHEMA_STRING, JSON_SCHEMA_DESCRIPTION: description}
+
+
+def _boolean_property(description: str) -> dict:
+    return {JSON_SCHEMA_TYPE: JSON_SCHEMA_BOOLEAN, JSON_SCHEMA_DESCRIPTION: description}
+
+
+RUN_COMMAND_PARAMETERS = {
+    JSON_SCHEMA_TYPE: JSON_SCHEMA_OBJECT,
+    JSON_SCHEMA_PROPERTIES: {
+        PARAM_COMMAND: _string_property(COMMAND_DESCRIPTION),
+        PARAM_EXPLANATION: _string_property(EXPLANATION_DESCRIPTION),
+        PARAM_INTERACTIVE: _boolean_property(INTERACTIVE_DESCRIPTION),
+    },
+    JSON_SCHEMA_REQUIRED: REQUIRED_PARAMS,
+}
+
+# How providers that take a single system string join the system texts, and how
+# they synthesize a call id when the model didn't supply one.
+SYSTEM_TEXT_SEPARATOR = "\n\n"
+
+
+def fallback_call_id(index: object) -> str:
+    return f"call_{index}"
+
 
 # -- neutral data types ------------------------------------------------------
 @dataclass

@@ -23,6 +23,7 @@ from .base import (
     PARAM_EXPLANATION,
     PARAM_INTERACTIVE,
     REQUIRED_PARAMS,
+    SYSTEM_TEXT_SEPARATOR,
     TOOL_DESCRIPTION,
     TOOL_NAME,
     AssistantMessage,
@@ -33,14 +34,18 @@ from .base import (
     TurnCollector,
     ToolResultsMessage,
     UserMessage,
+    fallback_call_id,
     import_optional,
     register,
 )
 
 _ROLE_USER = "user"
 _ROLE_MODEL = "model"
-_SYSTEM_JOIN = "\n\n"
-_RESPONSE_KEY = "output"
+_ROLE_TOOL = "tool"
+_RESPONSE_KEY = "result"
+_GEMINI_OBJECT = "OBJECT"
+_GEMINI_STRING = "STRING"
+_GEMINI_BOOLEAN = "BOOLEAN"
 _AUTH_STATUS_CODES = {401, 403}
 _AUTH_HINT = "api key"
 
@@ -50,11 +55,11 @@ def _function_declaration(types):
         name=TOOL_NAME,
         description=TOOL_DESCRIPTION,
         parameters=types.Schema(
-            type="OBJECT",
+            type=_GEMINI_OBJECT,
             properties={
-                PARAM_COMMAND: types.Schema(type="STRING", description=COMMAND_DESCRIPTION),
-                PARAM_EXPLANATION: types.Schema(type="STRING", description=EXPLANATION_DESCRIPTION),
-                PARAM_INTERACTIVE: types.Schema(type="BOOLEAN", description=INTERACTIVE_DESCRIPTION),
+                PARAM_COMMAND: types.Schema(type=_GEMINI_STRING, description=COMMAND_DESCRIPTION),
+                PARAM_EXPLANATION: types.Schema(type=_GEMINI_STRING, description=EXPLANATION_DESCRIPTION),
+                PARAM_INTERACTIVE: types.Schema(type=_GEMINI_BOOLEAN, description=INTERACTIVE_DESCRIPTION),
             },
             required=REQUIRED_PARAMS,
         ),
@@ -100,7 +105,9 @@ class GeminiProvider(ModelProvider):
 
     def build_request(self, history, system_texts, disable_tools) -> dict:
         types = self._types
-        config_kwargs = {"system_instruction": _SYSTEM_JOIN.join(system_texts)}
+        config_kwargs = {
+            "system_instruction": SYSTEM_TEXT_SEPARATOR.join(system_texts)
+        }
         if not disable_tools:
             tool = types.Tool(function_declarations=[_function_declaration(types)])
             config_kwargs["tools"] = [tool]
@@ -119,7 +126,7 @@ class GeminiProvider(ModelProvider):
             for chunk in stream:
                 collector.add_text(_chunk_text(chunk))
                 for index, call in enumerate(_chunk_function_calls(chunk)):
-                    call_id = getattr(call, "id", None) or f"call_{index}"
+                    call_id = getattr(call, "id", None) or fallback_call_id(index)
                     collector.add_tool_call(call_id, dict(call.args or {}))
         except self._errors.APIError as e:
             if _is_auth_error(e):
@@ -138,7 +145,7 @@ class GeminiProvider(ModelProvider):
                     role=_ROLE_MODEL, parts=self._assistant_parts(item)))
             elif isinstance(item, ToolResultsMessage):
                 contents.append(types.Content(
-                    role=_ROLE_USER, parts=self._result_parts(item)))
+                    role=_ROLE_TOOL, parts=self._result_parts(item)))
         return contents
 
     def _assistant_parts(self, item: AssistantMessage) -> list:
@@ -160,10 +167,10 @@ class GeminiProvider(ModelProvider):
     def _result_parts(self, item: ToolResultsMessage) -> list:
         types = self._types
         return [
-            types.Part(function_response=types.FunctionResponse(
+            types.Part.from_function_response(
                 name=TOOL_NAME,
                 response={_RESPONSE_KEY: result.content},
-            ))
+            )
             for result in item.results
         ]
 

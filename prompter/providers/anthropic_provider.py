@@ -14,13 +14,10 @@ import anthropic
 
 from ..config import PROVIDER_ANTHROPIC, Config
 from .base import (
-    COMMAND_DESCRIPTION,
-    EXPLANATION_DESCRIPTION,
-    INTERACTIVE_DESCRIPTION,
     PARAM_COMMAND,
     PARAM_EXPLANATION,
     PARAM_INTERACTIVE,
-    REQUIRED_PARAMS,
+    RUN_COMMAND_PARAMETERS,
     TOOL_DESCRIPTION,
     TOOL_NAME,
     AssistantMessage,
@@ -54,40 +51,16 @@ _DELTA_TEXT = "text_delta"
 _THINKING_ADAPTIVE = {"type": "adaptive"}
 _TOOL_CHOICE_NONE = {"type": "none"}
 
-_SCHEMA_TYPE = "type"
-_SCHEMA_OBJECT = "object"
-_SCHEMA_STRING = "string"
-_SCHEMA_BOOLEAN = "boolean"
-_SCHEMA_DESCRIPTION = "description"
-_SCHEMA_PROPERTIES = "properties"
-_SCHEMA_REQUIRED = "required"
 _TOOL_KEY_NAME = "name"
 _TOOL_KEY_DESCRIPTION = "description"
 _TOOL_KEY_INPUT_SCHEMA = "input_schema"
 
 _CLIENT_INIT_ERROR = "Could not initialize the Anthropic client: {error}"
 
-
-def _string_property(description: str) -> dict:
-    return {_SCHEMA_TYPE: _SCHEMA_STRING, _SCHEMA_DESCRIPTION: description}
-
-
-def _boolean_property(description: str) -> dict:
-    return {_SCHEMA_TYPE: _SCHEMA_BOOLEAN, _SCHEMA_DESCRIPTION: description}
-
-
 _RUN_TOOL = {
     _TOOL_KEY_NAME: TOOL_NAME,
     _TOOL_KEY_DESCRIPTION: TOOL_DESCRIPTION,
-    _TOOL_KEY_INPUT_SCHEMA: {
-        _SCHEMA_TYPE: _SCHEMA_OBJECT,
-        _SCHEMA_PROPERTIES: {
-            PARAM_COMMAND: _string_property(COMMAND_DESCRIPTION),
-            PARAM_EXPLANATION: _string_property(EXPLANATION_DESCRIPTION),
-            PARAM_INTERACTIVE: _boolean_property(INTERACTIVE_DESCRIPTION),
-        },
-        _SCHEMA_REQUIRED: REQUIRED_PARAMS,
-    },
+    _TOOL_KEY_INPUT_SCHEMA: RUN_COMMAND_PARAMETERS,
 }
 
 

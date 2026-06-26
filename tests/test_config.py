@@ -22,8 +22,8 @@ def test_defaults():
 
 @pytest.mark.parametrize("provider, model", [
     ("anthropic", "claude-sonnet-4-6"),
-    ("openai", "gpt-5"),
-    ("gemini", "gemini-2.5-flash"),
+    ("openai", "gpt-5.4"),
+    ("gemini", "gemini-3.5-flash"),
 ])
 def test_resolved_model_per_provider(provider, model):
     assert Config(provider=provider).resolved_model == model

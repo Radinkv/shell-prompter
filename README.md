@@ -1,48 +1,70 @@
 # prompter
 
-A natural-language shell agent powered by your choice of model — Claude, OpenAI
-(or any OpenAI-compatible endpoint like Groq/OpenRouter), or Gemini. You describe
-what you want in plain English; `prompter` figures out the shell commands, shows
-each one with a risk rating, asks before anything non-trivial, and runs them —
-tracking the working directory as it goes, just like a real shell session.
+prompter turns plain English into real shell commands. You describe what you
+want. It figures out the commands, shows each one with a risk rating, asks
+before anything risky, and runs them. It tracks the working directory as it
+goes, like a real shell session.
+
+It runs on the model you choose: Claude, OpenAI (or any OpenAI-compatible
+endpoint such as Groq or OpenRouter), or Gemini.
 
 ```
 $ prompter "make a folder called scratch, cd into it, then run claude"
 $ prompter "download uv if it isn't installed, then print its version"
-$ prompter            # no prompt → interactive REPL
+$ prompter            # no prompt: starts an interactive REPL
 ```
 
-Unlike a coding agent (which lives inside one repo), prompter's workspace is
-your **whole shell**. Launching Claude Code, installing tools, cloning repos,
-converting files — it's all just commands it knows how to run. Claude Code
-becomes one of the tools prompter can invoke, not the thing you're inside of.
+A coding agent lives inside one repository. prompter works on your whole shell.
+Launching a coding agent, installing tools, cloning repos, converting files: it
+is all just commands. A coding agent like Claude Code becomes one of the tools
+prompter can launch, not the thing you live inside.
 
 ## Install
 
-Requires Python 3.9+. The default provider is Anthropic (ships in the base
-install); add an extra for OpenAI or Gemini.
+The distribution is `shell-prompter`. It installs one command, `prompter`.
+Anthropic ships in the base install. Add an extra for OpenAI or Gemini.
+
+The easiest option is [pipx](https://pipx.pypa.io). It puts `prompter` on your
+PATH globally and keeps it isolated.
+
+```bash
+pipx install ".[all]"
+# or straight from GitHub once pushed:
+pipx install "git+https://github.com/radinkv/shell-prompter.git[all]"
+```
+
+For working on the code, use an editable install in a venv.
 
 ```bash
 cd shell-prompter
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e .              # Anthropic (default)
-pip install -e ".[openai]"    # + OpenAI / Groq / OpenRouter
-pip install -e ".[gemini]"    # + Gemini
+pip install -e .              # Anthropic only
+pip install -e ".[openai]"    # add OpenAI, Groq, OpenRouter
+pip install -e ".[gemini]"    # add Gemini
 pip install -e ".[all]"       # everything
-
-export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY / GEMINI_API_KEY
 ```
 
-Now `prompter` is on your PATH (inside the venv). To use it from anywhere
-without activating the venv, install with [pipx](https://pipx.pypa.io) instead:
+Set the API key for your provider:
 
 ```bash
-pipx install -e /path/to/shell-prompter
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, or GEMINI_API_KEY
 ```
 
-## Config & defaults
+### Publishing to PyPI
 
-On first run, prompter writes `~/.prompter/config.json`:
+The metadata in `pyproject.toml` is ready. Point `[project.urls]` at your
+repository, confirm the name `shell-prompter` is free on PyPI, then build and
+upload:
+
+```bash
+pip install -e ".[dev]"   # build and twine come with the dev extra
+python -m build           # writes dist/*.whl and *.tar.gz
+twine upload dist/*       # needs a PyPI account and API token
+```
+
+## Config
+
+On first run prompter writes `~/.prompter/config.json`:
 
 ```json
 {
@@ -59,153 +81,146 @@ On first run, prompter writes `~/.prompter/config.json`:
 }
 ```
 
-- **`default_workspace`** — where new projects go when you don't say where. So
-  `prompter "make a project called hunchday and run claude"` creates
-  `~/Code/hunchday`, not a folder in whatever directory you happened to be in.
-- **`provider`** — `anthropic`, `openai`, or `gemini`. See [Providers](#providers).
-- **`model`** — empty means "use the provider's default" (Anthropic →
-  `claude-sonnet-4-6`, OpenAI → `gpt-5`, Gemini → `gemini-2.5-flash`). Set it to
-  pin a model, or override per-run with `--model`.
-- **`base_url`** — point the OpenAI adapter at a compatible endpoint (Groq,
-  OpenRouter). Ignored by the other providers.
-- **`api_key_env`** — override which environment variable holds the API key
-  (default is `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY`).
-- **`preferences`** — free-form lines handed straight to the model. Add your own
-  (`"Use pnpm, not npm."`, `"Default Python to a .venv."`) and they're respected.
-- **`max_fix_attempts`** — see the retry section below.
-- **`auto_approve_safe`** — set to `false` to make prompter confirm *everything*.
+| Key | What it does |
+|-----|--------------|
+| `default_workspace` | Where new projects go when you don't say where. `prompter "make a project called hunchday"` creates `~/Code/hunchday`, not a folder in the current directory. |
+| `provider` | `anthropic`, `openai`, or `gemini`. See [Providers](#providers). |
+| `model` | Empty means "use the provider's default" (listed in the Providers table). Set it to pin a model. |
+| `base_url` | Points the OpenAI adapter at a compatible endpoint such as Groq or OpenRouter. Other providers ignore it. |
+| `api_key_env` | The environment variable that holds the API key. Defaults to `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`. |
+| `max_fix_attempts` | How many commands may fail in a row before prompter stops. See [Self-repair](#self-repair). |
+| `auto_approve_safe` | Set to `false` to confirm every command, including safe ones. |
+| `preferences` | Free-form lines passed straight to the model, such as `"Use pnpm, not npm."` |
 
-Run `prompter --config` to print the path. Override per-run with `--provider`,
-`--model`, `--base-url`, `--workspace`, and `--max-fix`.
+Run `prompter --config` to print the path. Any key can be overridden for a
+single run with a flag (see [Flags](#flags)).
 
 ## Providers
 
-The model backend is pluggable behind one small interface, so the agent behaves
-identically whichever you pick. Switch with `provider` in config (or `--provider`).
+The model backend sits behind one small interface, so prompter behaves the same
+whichever you pick. Switch with `provider` in config, or `--provider` for one
+run.
 
-| Provider | Install | Default model | Key env | Notes |
+| Provider | Install | Default model | API key | Notes |
 |----------|---------|---------------|---------|-------|
-| `anthropic` | base | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | Default; also reads an `ant auth login` profile. |
-| `openai` | `.[openai]` | `gpt-5` | `OPENAI_API_KEY` | Set `base_url` to use **Groq** or **OpenRouter** (both speak the OpenAI API). |
-| `gemini` | `.[gemini]` | `gemini-2.5-flash` | `GEMINI_API_KEY` | Has a generous free tier — good for everyday use. |
+| `anthropic` | base | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | Default. Also reads an `ant auth login` profile. |
+| `openai` | `.[openai]` | `gpt-5.4` | `OPENAI_API_KEY` | Set `base_url` for Groq or OpenRouter (both speak the OpenAI API). Drop to `gpt-5.4-mini` to go cheaper. |
+| `gemini` | `.[gemini]` | `gemini-3.5-flash` | `GEMINI_API_KEY` | Generous free tier, good for everyday use. |
 
-A note on billing: an Anthropic Pro/Max **subscription** and an **API key** are
-separate accounts — a program can't bill against your web subscription. If you
-want a free tier for casual use, Gemini (or Groq/OpenRouter via the OpenAI
-adapter) is the way; switch to Anthropic when you want it.
+A note on billing. An Anthropic Pro or Max subscription and an API key are
+separate accounts. A program cannot bill against your web subscription. For a
+free tier, use Gemini, or Groq/OpenRouter through the OpenAI adapter. Switch to
+Anthropic when you want it.
 
-> The OpenAI and Gemini adapters are written against the standard SDK surfaces
-> but haven't been run live here — smoke-test them once with a real key. The
-> Anthropic adapter is the reference implementation.
+> Model IDs and SDK shapes were checked against the providers' June 2026 docs.
+> The Gemini adapter sends function results with role `tool`, matching the
+> current google-genai API. Run one live test per provider before relying on it;
+> OpenAI and Gemini were not run here.
 
-## Self-repair, bounded
+## Risk tiers and confirmation
 
-prompter runs a command, sees the **actual error**, and decides the next step —
-so "compile with clang++" failing because clang++ isn't installed leads to a
-retry with `g++` on its own, no scripted repair rules needed.
+Every command prompter proposes is graded into one of three tiers. The tier
+decides whether it runs on its own or asks first.
 
-To stop it churning forever on a wedged step, `max_fix_attempts` (default 3)
-caps how many commands may fail **in a row**. Hit the cap and prompter tells
-Claude to stop, summarize what went wrong, and hand it back to you. A command
-*you* decline doesn't count against the limit — only commands that actually ran
-and failed.
+| Tier | Examples | Default |
+|------|----------|---------|
+| 🟢 SAFE | `ls`, `cd`, `mkdir`, `git status`, `cat` | runs automatically |
+| 🟡 CONFIRM | `brew install`, `pip install`, `git clone`, `mv`, `rm`, `curl` | asks first |
+| 🔴 DANGER | `rm -rf`, `sudo`, `curl ... \| sh`, force-push, `dd` | asks first, shown in red |
+
+When prompter asks, you answer:
+
+- `y` or Enter: run it
+- `n`: skip it (the model is told and adapts)
+- `a`: run it and auto-approve the rest of this run
+- `q`: quit
+
+`curl ... | sh` is always DANGER, because it runs code you have not seen.
+`--yolo` removes the gate entirely. Use it only when you trust the task.
+
+## Self-repair
+
+prompter runs a command, reads the actual error, and decides the next step. If
+`clang++` is missing it retries with `g++` on its own. There are no scripted
+repair rules.
+
+`max_fix_attempts` (default 3) stops it from looping on a stuck step. It counts
+commands that fail in a row. At the limit, prompter tells the model to stop and
+explain what went wrong. A command you decline does not count; only commands
+that ran and failed do.
 
 ## How it works
 
-1. Your request + your OS, shell, current directory, default workspace, and
-   preferences go to Claude.
-2. Claude works toward the goal by calling a `run_command` tool, one command
-   at a time, reacting to each result before deciding the next step.
-3. Every proposed command is graded into a **risk tier**:
+1. Your request, plus your OS, shell, current directory, default workspace, and
+   preferences, go to the model.
+2. The model works toward the goal by calling one tool, `run_command`, a single
+   command at a time, reacting to each result.
+3. prompter grades each command (see [Risk tiers](#risk-tiers-and-confirmation))
+   and runs or gates it.
+4. The working directory persists across commands, so "make a folder, cd in,
+   then run claude" lands in the right place.
 
-   | Tier        | Examples                                        | Default behavior |
-   |-------------|-------------------------------------------------|------------------|
-   | 🟢 `SAFE`    | `ls`, `cd`, `mkdir`, `git status`, `cat`        | runs automatically |
-   | 🟡 `CONFIRM` | `brew install`, `pip install`, `git clone`, `mv`, `rm`, `curl` | asks first |
-   | 🔴 `DANGER`  | `rm -rf`, `sudo`, `curl … \| sh`, force-push, `dd` | asks first, in red |
+prompter cannot change the directory of the shell you launched it from; no
+program can. It runs every command, and launches your coding agent, in the right
+place, which covers these workflows.
 
-4. `cd` actually sticks: prompter tracks the working directory across commands,
-   so "make a folder, cd in, then run claude" lands you in the right place.
-
-> **Note on directories:** like any tool of this kind, prompter can't change the
-> directory of the *outer* shell you launched it from — that's an OS limitation.
-> But it runs every subsequent command (and launches Claude) in the right place,
-> which covers the workflows above.
-
-## Confirmation prompt
-
-When prompter asks, you can answer:
-
-- `y` / Enter — run this command
-- `n` — skip it (Claude is told and adapts)
-- `a` — run this and auto-approve the rest of this run
-- `q` — quit
+Programs that take over the terminal (`claude`, `vim`, `ssh`, a REPL, `top`) get
+the real terminal so you can interact with them. The model marks these
+automatically.
 
 ## Flags
 
-| Flag            | Effect                                                    |
-|-----------------|-----------------------------------------------------------|
-| `--workspace P` | Override `default_workspace` for this run.                |
-| `--max-fix N`   | Override `max_fix_attempts` for this run.                 |
-| `--ask-all`     | Confirm **every** command, including safe ones.           |
-| `--yolo`        | Run everything with no confirmation. Dangerous — use sparingly. |
-| `--model ID`    | Override the model (config `model`, else `claude-sonnet-4-6`). |
-| `--config`      | Print the config file path and exit.                      |
-
-## Interactive programs
-
-For things that take over the terminal — `claude`, `vim`, `ssh`, a Python REPL,
-`top` — prompter hands them the real terminal so you can interact, instead of
-capturing their output. Claude marks these calls automatically.
+| Flag | Effect |
+|------|--------|
+| `--provider NAME` | Use anthropic, openai, or gemini for this run. |
+| `--model ID` | Override the model. |
+| `--base-url URL` | OpenAI-compatible endpoint (Groq, OpenRouter). |
+| `--workspace PATH` | Override the default workspace. |
+| `--max-fix N` | Override `max_fix_attempts`. |
+| `--ask-all` | Confirm every command, including safe ones. |
+| `--yolo` | Run everything with no confirmation. Dangerous. |
+| `--config` | Print the config file path and exit. |
 
 ## Project layout
 
 ```
 prompter/
-  constants.py   protocol strings + magic numbers, all named
-  colors.py      Palette (ANSI, auto-disabled off-TTY)
-  config.py      Config dataclass, ApprovalMode, load/save
-  risk.py        RiskTier, classify() — the safe/confirm/danger rules
-  shell.py       Shell + CommandResult — execution & cwd tracking
-  prompts.py     system prompt + per-turn environment context
+  colors.py      Palette (ANSI, off when output is not a TTY)
+  config.py      Config dataclass, ApprovalMode, load and save
+  risk.py        RiskTier and classify(): the safe/confirm/danger rules
+  shell.py       Shell and CommandResult: execution and cwd tracking
+  prompts.py     system prompt and per-turn environment context
   providers/     pluggable model backends
     base.py        neutral types, ModelProvider ABC, registry
-    anthropic_provider.py / openai_provider.py / gemini_provider.py
-  ui.py          Console + Decision — every print/input lives here
-  agent.py       Agent, Conversation — the orchestration loop only
+    anthropic_provider.py, openai_provider.py, gemini_provider.py
+  ui.py          Console and Decision: all printing and input
+  agent.py       Agent and Conversation: the orchestration loop
   cli.py         argument parsing, wiring, main()
 tests/
-  conftest.py, _helpers.py   fixtures + fakes (FakeShell, ScriptedClaude, ...)
-  test_*.py                  one unit-test module per package module
+  conftest.py, _helpers.py   fixtures and fakes (FakeProvider, FakeShell)
+  test_*.py                  one module per package module
 ```
 
-The split follows a state boundary: stateful pieces (`Shell`, `Agent`, the
-provider, `Console`) are objects that get injected into each other; pure
-transforms (`classify`, `truncate`, config loading, context building) are plain
-functions. `Agent` orchestrates its collaborators and does no I/O or API calls
-itself, which is what makes it testable with a fake provider + console.
+The design follows a state boundary. Stateful pieces (`Shell`, `Agent`, the
+provider, `Console`) are objects injected into each other. Pure transforms
+(`classify`, `truncate`, config loading, context building) are plain functions.
+`Agent` orchestrates its collaborators and does no I/O or API calls itself, so it
+can be tested with a fake provider and console.
 
-Providers share a **template-method** base: `ModelProvider.complete()` owns the
-invariant algorithm (build request → stream into a `TurnCollector` → wrap errors
-→ return a turn); each adapter supplies only `build_request` and `run_stream`.
-Adding a backend is one file in `providers/` and a `@register` line — nothing in
-the agent changes.
+Providers share a template-method base. `ModelProvider.complete()` owns the
+fixed algorithm: build a request, stream it into a `TurnCollector`, wrap provider
+errors, return a turn. Each adapter supplies only `build_request` and
+`run_stream`. Adding a backend is one file in `providers/` plus one `@register`
+line, with no change to the agent.
 
 ## Tests
 
 ```bash
-pip install -e ".[dev]"   # installs pytest
-pytest                    # ~114 unit tests, no network or API key needed
+pip install -e ".[dev]"
+pytest
 ```
 
-The agent loop is tested by injecting fakes (a scripted provider, a recording
-shell, a mock console), so the full stream → gate → run → repeat cycle runs
-offline. Each adapter's neutral round-trip is tested with a fake SDK client.
-
-## Safety notes
-
-- Commands come from a language model. The risk tiers and confirmation gate are
-  there so you stay in control; read what you're approving, especially 🔴 items.
-- `--yolo` removes that gate entirely. Only use it when you fully trust the task.
-- "Download and run this from the internet" (`curl … | sh`) is always flagged as
-  `DANGER`, because it executes code you haven't seen.
+About 114 unit tests, no network or API key needed. The agent loop is tested
+with fakes: a scripted provider, a recording shell, a mock console. Each
+adapter's translation to and from its wire format is tested with a fake SDK
+client.

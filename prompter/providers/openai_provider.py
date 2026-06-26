@@ -16,13 +16,11 @@ import os
 
 from ..config import PROVIDER_OPENAI, Config
 from .base import (
-    COMMAND_DESCRIPTION,
-    EXPLANATION_DESCRIPTION,
-    INTERACTIVE_DESCRIPTION,
     PARAM_COMMAND,
     PARAM_EXPLANATION,
     PARAM_INTERACTIVE,
-    REQUIRED_PARAMS,
+    RUN_COMMAND_PARAMETERS,
+    SYSTEM_TEXT_SEPARATOR,
     TOOL_DESCRIPTION,
     TOOL_NAME,
     AssistantMessage,
@@ -32,6 +30,7 @@ from .base import (
     TurnCollector,
     ToolResultsMessage,
     UserMessage,
+    fallback_call_id,
     import_optional,
     register,
 )
@@ -41,22 +40,18 @@ _ROLE_USER = "user"
 _ROLE_ASSISTANT = "assistant"
 _ROLE_TOOL = "tool"
 _FUNCTION_TYPE = "function"
-_SYSTEM_JOIN = "\n\n"
+_TOOL_KEY_TYPE = "type"
+_TOOL_KEY_FUNCTION = "function"
+_TOOL_KEY_NAME = "name"
+_TOOL_KEY_DESCRIPTION = "description"
+_TOOL_KEY_PARAMETERS = "parameters"
 
 _FUNCTION_TOOL = {
-    "type": _FUNCTION_TYPE,
-    "function": {
-        "name": TOOL_NAME,
-        "description": TOOL_DESCRIPTION,
-        "parameters": {
-            "type": "object",
-            "properties": {
-                PARAM_COMMAND: {"type": "string", "description": COMMAND_DESCRIPTION},
-                PARAM_EXPLANATION: {"type": "string", "description": EXPLANATION_DESCRIPTION},
-                PARAM_INTERACTIVE: {"type": "boolean", "description": INTERACTIVE_DESCRIPTION},
-            },
-            "required": REQUIRED_PARAMS,
-        },
+    _TOOL_KEY_TYPE: _FUNCTION_TYPE,
+    _TOOL_KEY_FUNCTION: {
+        _TOOL_KEY_NAME: TOOL_NAME,
+        _TOOL_KEY_DESCRIPTION: TOOL_DESCRIPTION,
+        _TOOL_KEY_PARAMETERS: RUN_COMMAND_PARAMETERS,
     },
 }
 
@@ -64,7 +59,8 @@ _CLIENT_INIT_ERROR = "Could not initialize the OpenAI client: {error}"
 
 
 def _to_messages(system_texts: list[str], history: list[HistoryItem]) -> list[dict]:
-    messages = [{"role": _ROLE_SYSTEM, "content": _SYSTEM_JOIN.join(system_texts)}]
+    messages = [{"role": _ROLE_SYSTEM,
+                 "content": SYSTEM_TEXT_SEPARATOR.join(system_texts)}]
     for item in history:
         if isinstance(item, UserMessage):
             messages.append({"role": _ROLE_USER, "content": item.text})
@@ -144,7 +140,7 @@ class OpenAIProvider(ModelProvider):
             collector.add_text(getattr(delta, "content", None))
             _accumulate_tool_deltas(delta, accumulated)
         for index, slot in accumulated.items():
-            call_id = slot["id"] or f"call_{index}"
+            call_id = slot["id"] or fallback_call_id(index)
             collector.add_tool_call(call_id, _parse_args(slot["args"]))
 
 

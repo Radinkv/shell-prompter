@@ -233,15 +233,23 @@ def test_openai_parse_args_bad_json():
 # ============================================================================
 # Gemini adapter
 # ============================================================================
+class _FakePart:
+    def __init__(self, text=None, function_call=None, function_response=None):
+        self.text = text
+        self.function_call = function_call
+        self.function_response = function_response
+
+    @staticmethod
+    def from_function_response(name=None, response=None):
+        return _FakePart(function_response=_ns(name=name, response=response))
+
+
 def _fake_genai_types():
     return _ns(
         Content=lambda role=None, parts=None: _ns(role=role, parts=parts),
-        Part=lambda text=None, function_call=None, function_response=None: _ns(
-            text=text, function_call=function_call, function_response=function_response),
+        Part=_FakePart,
         FunctionCall=lambda name=None, args=None, id=None: _ns(
             name=name, args=args, id=id),
-        FunctionResponse=lambda name=None, response=None: _ns(
-            name=name, response=response),
         Tool=lambda function_declarations=None: _ns(
             function_declarations=function_declarations),
         FunctionDeclaration=lambda name=None, description=None, parameters=None: _ns(
@@ -302,7 +310,8 @@ def test_gemini_to_contents():
     assert contents[0].parts[0].text == "hi"
     assert contents[1].role == "model"
     assert contents[1].parts[0].function_call.name == "run_command"
-    assert contents[2].parts[0].function_response.response == {"output": "out"}
+    assert contents[2].role == "tool"
+    assert contents[2].parts[0].function_response.response == {"result": "out"}
 
 
 def test_gemini_complete_round_trip():
