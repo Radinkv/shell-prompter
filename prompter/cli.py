@@ -229,6 +229,17 @@ def _dispatch_error(console: Console, exc: BaseException) -> int:
     raise exc
 
 
+def _auth_failure_exit(config: Config, console: Console,
+                       exc: BaseException, attempt: int) -> int:
+    if attempt == 0:
+        # The user declined the prompt rather than entering a key.
+        print(_NO_KEY_EXIT.format(provider=config.provider, env=config.key_env),
+              file=sys.stderr)
+        return ERROR_EXIT_CODE
+    # A key was entered on the first attempt but the provider still rejected it.
+    return _handle_auth(console, exc)
+
+
 def run(args, console: Console) -> int:
     config = load_config()
     for attempt in range(2):
@@ -237,7 +248,7 @@ def run(args, console: Console) -> int:
         except ProviderAuthError as exc:
             if attempt == 0 and _prompt_and_store_key(config, _AUTH_FAILED_INTRO):
                 continue
-            return _handle_auth(console, exc)
+            return _auth_failure_exit(config, console, exc, attempt)
         except (KeyboardInterrupt, Exception) as exc:
             return _dispatch_error(console, exc)
     return ERROR_EXIT_CODE

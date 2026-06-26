@@ -167,7 +167,7 @@ def test_run_returns_ok(monkeypatch):
     assert cli.run(args, MagicMock(spec=Console)) == cli.OK_EXIT_CODE
 
 
-def test_run_auth_prompt_blank_exits(monkeypatch):
+def test_run_auth_prompt_blank_exits(monkeypatch, capsys):
     def boom(agent, goal):
         raise ProviderAuthError("no key")
 
@@ -175,6 +175,19 @@ def test_run_auth_prompt_blank_exits(monkeypatch):
     monkeypatch.setattr(cli.getpass, "getpass", lambda _p="": "")
     args = cli.build_parser().parse_args([])
     assert cli.run(args, MagicMock(spec=Console)) == cli.ERROR_EXIT_CODE
+    assert "keys set" in capsys.readouterr().err
+
+
+def test_run_auth_rejected_key_uses_handler(monkeypatch, keys_path):
+    def boom(agent, goal):
+        raise ProviderAuthError("bad key")
+
+    _stub_run(monkeypatch, boom)
+    monkeypatch.setattr(cli.getpass, "getpass", lambda _p="": "sk-wrong-0000")
+    console = MagicMock(spec=Console)
+    args = cli.build_parser().parse_args([])
+    assert cli.run(args, console) == cli.ERROR_EXIT_CODE
+    console.auth_error.assert_called_once()
 
 
 def test_run_auth_retries_after_key(monkeypatch, keys_path):
