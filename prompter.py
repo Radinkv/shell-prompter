@@ -34,7 +34,10 @@ except ImportError:  # pragma: no cover - import guard
         "(or reinstall prompter with:  pip install -e .)"
     )
 
-MODEL = "claude-opus-4-8"
+# Sonnet is the default: this agent does mostly simple, latency-sensitive shell
+# planning with a react-to-stderr loop, which Sonnet handles well and cheaply.
+# Bump to claude-opus-4-8 (config "model" or --model) for genuinely hard tasks.
+MODEL = "claude-sonnet-4-6"
 
 # ----------------------------------------------------------------------------
 # Config  (~/.prompter/config.json)
@@ -50,6 +53,7 @@ CONFIG_PATH = os.path.expanduser("~/.prompter/config.json")
 
 DEFAULT_CONFIG = {
     "default_workspace": "~/Code",
+    "model": MODEL,
     "max_fix_attempts": 3,
     "auto_approve_safe": True,
     "preferences": [
@@ -559,6 +563,9 @@ def make_agent(args, config: dict) -> Agent:
         config["default_workspace"] = args.workspace
     if args.max_fix is not None:
         config["max_fix_attempts"] = args.max_fix
+    # Model precedence: --model flag > config "model" > built-in default.
+    model = args.model or config.get("model") or MODEL
+    config["model"] = model
 
     if args.yolo:
         mode = "yolo"
@@ -566,13 +573,14 @@ def make_agent(args, config: dict) -> Agent:
         mode = "ask-all"
     else:
         mode = "smart"
-    return Agent(build_client(), Shell(), mode, args.model, config)
+    return Agent(build_client(), Shell(), mode, model, config)
 
 
 def banner(mode: str, config: dict):
     print(f"{C.MAGENTA}{C.BOLD}prompter{C.RESET} "
           f"{C.DIM}· natural-language shell agent · mode={mode}{C.RESET}")
-    print(f"{C.DIM}workspace: {os.path.expanduser(config['default_workspace'])}"
+    print(f"{C.DIM}model: {config['model']} · "
+          f"workspace: {os.path.expanduser(config['default_workspace'])}"
           f" · max-fix: {config['max_fix_attempts']}{C.RESET}")
     if mode == "yolo":
         print(f"{C.RED}{C.BOLD}⚠ YOLO mode: every command runs without "
@@ -585,7 +593,8 @@ def main(argv: list[str] | None = None) -> int:
         description="Describe what you want; prompter runs the shell commands.",
     )
     parser.add_argument("prompt", nargs="*", help="What you want done.")
-    parser.add_argument("--model", default=MODEL, help=f"Model (default {MODEL}).")
+    parser.add_argument("--model", default=None,
+                        help=f"Model override (config 'model', else {MODEL}).")
     parser.add_argument("--workspace",
                         help="Override the default project workspace this run.")
     parser.add_argument("--max-fix", type=int, default=None,

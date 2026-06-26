@@ -41,6 +41,7 @@ On first run, prompter writes `~/.prompter/config.json`:
 ```json
 {
   "default_workspace": "~/Code",
+  "model": "claude-sonnet-4-6",
   "max_fix_attempts": 3,
   "auto_approve_safe": true,
   "preferences": [
@@ -52,13 +53,17 @@ On first run, prompter writes `~/.prompter/config.json`:
 - **`default_workspace`** — where new projects go when you don't say where. So
   `prompter "make a project called hunchday and run claude"` creates
   `~/Code/hunchday`, not a folder in whatever directory you happened to be in.
+- **`model`** — defaults to `claude-sonnet-4-6`. This agent does mostly simple,
+  latency-sensitive shell planning, which Sonnet handles well and cheaply. Bump
+  to `claude-opus-4-8` for genuinely hard tasks (big multi-step setups, tricky
+  debugging) — set it here, or per-run with `--model`.
 - **`preferences`** — free-form lines handed straight to the model. Add your own
   (`"Use pnpm, not npm."`, `"Default Python to a .venv."`) and they're respected.
 - **`max_fix_attempts`** — see the retry section below.
 - **`auto_approve_safe`** — set to `false` to make prompter confirm *everything*.
 
-Run `prompter --config` to print the path. Override per-run with `--workspace`
-and `--max-fix`.
+Run `prompter --config` to print the path. Override per-run with `--workspace`,
+`--max-fix`, and `--model`.
 
 ## Self-repair, bounded
 
@@ -111,7 +116,7 @@ When prompter asks, you can answer:
 | `--max-fix N`   | Override `max_fix_attempts` for this run.                 |
 | `--ask-all`     | Confirm **every** command, including safe ones.           |
 | `--yolo`        | Run everything with no confirmation. Dangerous — use sparingly. |
-| `--model ID`    | Override the model (default `claude-opus-4-8`).           |
+| `--model ID`    | Override the model (config `model`, else `claude-sonnet-4-6`). |
 | `--config`      | Print the config file path and exit.                      |
 
 ## Interactive programs
