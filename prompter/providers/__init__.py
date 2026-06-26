@@ -21,6 +21,7 @@ from .base import (
     UserMessage,
     create_provider,
     known_providers,
+    unknown_provider_message,
 )
 
 __all__ = [
@@ -37,4 +38,5 @@ __all__ = [
     "UserMessage",
     "create_provider",
     "known_providers",
+    "unknown_provider_message",
 ]

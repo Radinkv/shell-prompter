@@ -23,6 +23,7 @@ from .providers import (
     ProviderError,
     create_provider,
     known_providers,
+    unknown_provider_message,
 )
 from .shell import Shell
 from .ui import Console
@@ -40,6 +41,24 @@ _MISSING_KEY_TEMPLATE = (
 
 _KEYS_COMMAND = "keys"
 _KEYS_USAGE = "Usage: prompter keys [list | set <provider> | clear <provider> | path]"
+_KEYS_LIST = "list"
+_KEYS_SET = "set"
+_KEYS_CLEAR = ("clear", "remove", "rm")
+_KEYS_PATH = "path"
+
+_KEYS_LIST_ROW = "  {provider:10} {source}"
+_KEY_SOURCE_ENV = "environment ({env})"
+_KEY_SOURCE_STORED = "stored ({masked})"
+_KEY_SOURCE_NOT_SET = "not set"
+_MASK_TEMPLATE = "...{tail}"
+_MASK_FALLBACK = "set"
+_PROVIDER_PROMPT = "Provider ({choices}): "
+_KEY_INPUT_PROMPT = "Paste the {provider} API key (input hidden): "
+_NO_KEY_ENTERED = "No key entered; nothing saved."
+_KEY_SAVED = "Saved the {provider} key to {path} (readable only by you)."
+_CLEAR_USAGE = "Usage: prompter keys clear <provider>"
+_KEY_REMOVED = "Removed the stored {provider} key."
+_NO_STORED_KEY = "No stored key for {provider}."
 
 _HELP_PROMPT = "What you want done."
 _HELP_PROVIDER = "Model provider this run (anthropic, openai, gemini)."
@@ -161,64 +180,67 @@ def _repl(agent: Agent, console: Console) -> None:
 
 
 def _mask(key: str) -> str:
-    return f"...{key[-4:]}" if len(key) >= 4 else "set"
+    return _MASK_TEMPLATE.format(tail=key[-4:]) if len(key) >= 4 else _MASK_FALLBACK
 
 
 def _keys_list() -> int:
     for provider in known_providers():
         env_name = default_api_key_env(provider)
+        stored = stored_key(provider)
         if env_name and os.environ.get(env_name):
-            source = f"environment ({env_name})"
-        elif stored_key(provider):
-            source = f"stored ({_mask(stored_key(provider))})"
+            source = _KEY_SOURCE_ENV.format(env=env_name)
+        elif stored:
+            source = _KEY_SOURCE_STORED.format(masked=_mask(stored))
         else:
-            source = "not set"
-        print(f"  {provider:10} {source}")
+            source = _KEY_SOURCE_NOT_SET
+        print(_KEYS_LIST_ROW.format(provider=provider, source=source))
     return OK_EXIT_CODE
 
 
 def _keys_set(rest: list[str]) -> int:
     providers = known_providers()
-    provider = rest[0] if rest else input(f"Provider ({'/'.join(providers)}): ").strip()
+    prompt = _PROVIDER_PROMPT.format(choices="/".join(providers))
+    provider = rest[0] if rest else input(prompt).strip()
     if provider not in providers:
-        print(f"Unknown provider '{provider}'. Choose one of: "
-              f"{', '.join(providers)}.", file=sys.stderr)
+        print(unknown_provider_message(provider), file=sys.stderr)
         return ERROR_EXIT_CODE
-    key = getpass.getpass(f"Paste the {provider} API key (input hidden): ").strip()
+    key = getpass.getpass(_KEY_INPUT_PROMPT.format(provider=provider)).strip()
     if not key:
-        print("No key entered; nothing saved.", file=sys.stderr)
+        print(_NO_KEY_ENTERED, file=sys.stderr)
         return ERROR_EXIT_CODE
     set_key(provider, key)
-    print(f"Saved the {provider} key to {KEYS_PATH} (readable only by you).")
+    print(_KEY_SAVED.format(provider=provider, path=KEYS_PATH))
     return OK_EXIT_CODE
 
 
 def _keys_clear(rest: list[str]) -> int:
     if not rest:
-        print("Usage: prompter keys clear <provider>", file=sys.stderr)
+        print(_CLEAR_USAGE, file=sys.stderr)
         return ERROR_EXIT_CODE
     provider = rest[0]
     if clear_key(provider):
-        print(f"Removed the stored {provider} key.")
+        print(_KEY_REMOVED.format(provider=provider))
     else:
-        print(f"No stored key for {provider}.")
+        print(_NO_STORED_KEY.format(provider=provider))
     return OK_EXIT_CODE
 
 
 def keys_command(argv: list[str]) -> int:
-    action = argv[0] if argv else "list"
+    action = argv[0] if argv else _KEYS_LIST
     rest = argv[1:]
-    if action == "list":
-        return _keys_list()
-    if action == "set":
-        return _keys_set(rest)
-    if action in ("clear", "remove", "rm"):
-        return _keys_clear(rest)
-    if action == "path":
-        print(KEYS_PATH)
-        return OK_EXIT_CODE
-    print(_KEYS_USAGE, file=sys.stderr)
-    return ERROR_EXIT_CODE
+    match action:
+        case _ if action == _KEYS_LIST:
+            return _keys_list()
+        case _ if action == _KEYS_SET:
+            return _keys_set(rest)
+        case _ if action in _KEYS_CLEAR:
+            return _keys_clear(rest)
+        case _ if action == _KEYS_PATH:
+            print(KEYS_PATH)
+            return OK_EXIT_CODE
+        case _:
+            print(_KEYS_USAGE, file=sys.stderr)
+            return ERROR_EXIT_CODE
 
 
 def main(argv: list[str] | None = None) -> int:

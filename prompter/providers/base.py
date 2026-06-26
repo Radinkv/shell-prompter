@@ -28,6 +28,13 @@ from typing import TYPE_CHECKING, Any, Callable, Union
 if TYPE_CHECKING:
     from ..config import Config
 
+# -- messages ----------------------------------------------------------------
+_UNKNOWN_PROVIDER = "Unknown provider '{name}'. Known providers: {known}."
+_NONE_REGISTERED = "(none registered)"
+_MISSING_PACKAGE = (
+    "The '{module}' package is missing. Reinstall prompter with:  pip install -e ."
+)
+
 # -- the run_command tool, described once for every adapter ------------------
 TOOL_NAME = "run_command"
 PARAM_COMMAND = "command"
@@ -232,19 +239,21 @@ def register(name: str) -> Callable[[ProviderFactory], ProviderFactory]:
     return decorator
 
 
+def known_providers() -> list[str]:
+    return sorted(_FACTORIES)
+
+
+def unknown_provider_message(name: str) -> str:
+    known = ", ".join(known_providers()) or _NONE_REGISTERED
+    return _UNKNOWN_PROVIDER.format(name=name, known=known)
+
+
 def create_provider(config: "Config") -> ModelProvider:
     try:
         factory = _FACTORIES[config.provider]
     except KeyError as e:
-        known = ", ".join(sorted(_FACTORIES)) or "(none registered)"
-        raise ProviderError(
-            f"Unknown provider '{config.provider}'. Known providers: {known}."
-        ) from e
+        raise ProviderError(unknown_provider_message(config.provider)) from e
     return factory(config)
-
-
-def known_providers() -> list[str]:
-    return sorted(_FACTORIES)
 
 
 def import_optional(module_name: str):
@@ -256,7 +265,4 @@ def import_optional(module_name: str):
     try:
         return importlib.import_module(module_name)
     except ImportError as e:
-        raise ProviderNotInstalled(
-            f"The '{module_name}' package is missing. "
-            f"Reinstall prompter with:  pip install -e ."
-        ) from e
+        raise ProviderNotInstalled(_MISSING_PACKAGE.format(module=module_name)) from e
