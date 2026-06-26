@@ -5,7 +5,7 @@ description = "A natural-language shell agent powered by Claude, OpenAI, or Gemi
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [{ name = "radinkv", email = "khashei@gmail.com" }]
+authors = [{ name = "radinkv", email = "26397342+Radinkv@users.noreply.github.com" }]
 keywords = ["cli", "shell", "ai", "agent", "llm", "anthropic", "openai", "gemini"]
 classifiers = [
     "Environment :: Console",
