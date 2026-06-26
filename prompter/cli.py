@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import os
 import sys
 
@@ -12,10 +13,17 @@ from .config import (
     CONFIG_PATH,
     Config,
     PROGRAM_NAME,
+    default_api_key_env,
     default_model_for,
     load_config,
 )
-from .providers import ProviderAuthError, ProviderError, create_provider
+from .keys import KEYS_PATH, clear_key, resolve_api_key, set_key, stored_key
+from .providers import (
+    ProviderAuthError,
+    ProviderError,
+    create_provider,
+    known_providers,
+)
 from .shell import Shell
 from .ui import Console
 
@@ -24,10 +32,14 @@ ERROR_EXIT_CODE = 1
 SIGINT_EXIT_CODE = 130
 
 _DESCRIPTION = "Describe what you want; prompter runs the shell commands."
+_EPILOG = "Manage API keys with:  prompter keys [list | set <provider> | clear <provider>]"
 _EXIT_WORDS = {"exit", "quit", ":q"}
 _MISSING_KEY_TEMPLATE = (
-    "Note: {env} is not set; relying on a saved login if your provider has one."
+    "No API key for {provider}. Run `prompter keys set {provider}` or export {env}."
 )
+
+_KEYS_COMMAND = "keys"
+_KEYS_USAGE = "Usage: prompter keys [list | set <provider> | clear <provider> | path]"
 
 _HELP_PROMPT = "What you want done."
 _HELP_PROVIDER = "Model provider this run (anthropic, openai, gemini)."
@@ -41,7 +53,8 @@ _HELP_CONFIG = "Print the config file path and exit."
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=PROGRAM_NAME, description=_DESCRIPTION)
+    parser = argparse.ArgumentParser(
+        prog=PROGRAM_NAME, description=_DESCRIPTION, epilog=_EPILOG)
     parser.add_argument("prompt", nargs="*", help=_HELP_PROMPT)
     parser.add_argument("--provider", help=_HELP_PROVIDER)
     parser.add_argument("--model", default=None, help=_HELP_MODEL)
@@ -77,8 +90,9 @@ def _resolve_mode(args, config: Config) -> ApprovalMode:
 
 def make_agent(args, config: Config, console: Console) -> Agent:
     _apply_overrides(args, config)
-    if config.key_env and not os.environ.get(config.key_env):
-        console.note(_MISSING_KEY_TEMPLATE.format(env=config.key_env))
+    if not resolve_api_key(config):
+        console.note(_MISSING_KEY_TEMPLATE.format(
+            provider=config.provider, env=config.key_env))
     mode = _resolve_mode(args, config)
     try:
         provider = create_provider(config)
@@ -146,7 +160,71 @@ def _repl(agent: Agent, console: Console) -> None:
         agent.run_turn(line)
 
 
+def _mask(key: str) -> str:
+    return f"...{key[-4:]}" if len(key) >= 4 else "set"
+
+
+def _keys_list() -> int:
+    for provider in known_providers():
+        env_name = default_api_key_env(provider)
+        if env_name and os.environ.get(env_name):
+            source = f"environment ({env_name})"
+        elif stored_key(provider):
+            source = f"stored ({_mask(stored_key(provider))})"
+        else:
+            source = "not set"
+        print(f"  {provider:10} {source}")
+    return OK_EXIT_CODE
+
+
+def _keys_set(rest: list[str]) -> int:
+    providers = known_providers()
+    provider = rest[0] if rest else input(f"Provider ({'/'.join(providers)}): ").strip()
+    if provider not in providers:
+        print(f"Unknown provider '{provider}'. Choose one of: "
+              f"{', '.join(providers)}.", file=sys.stderr)
+        return ERROR_EXIT_CODE
+    key = getpass.getpass(f"Paste the {provider} API key (input hidden): ").strip()
+    if not key:
+        print("No key entered; nothing saved.", file=sys.stderr)
+        return ERROR_EXIT_CODE
+    set_key(provider, key)
+    print(f"Saved the {provider} key to {KEYS_PATH} (readable only by you).")
+    return OK_EXIT_CODE
+
+
+def _keys_clear(rest: list[str]) -> int:
+    if not rest:
+        print("Usage: prompter keys clear <provider>", file=sys.stderr)
+        return ERROR_EXIT_CODE
+    provider = rest[0]
+    if clear_key(provider):
+        print(f"Removed the stored {provider} key.")
+    else:
+        print(f"No stored key for {provider}.")
+    return OK_EXIT_CODE
+
+
+def keys_command(argv: list[str]) -> int:
+    action = argv[0] if argv else "list"
+    rest = argv[1:]
+    if action == "list":
+        return _keys_list()
+    if action == "set":
+        return _keys_set(rest)
+    if action in ("clear", "remove", "rm"):
+        return _keys_clear(rest)
+    if action == "path":
+        print(KEYS_PATH)
+        return OK_EXIT_CODE
+    print(_KEYS_USAGE, file=sys.stderr)
+    return ERROR_EXIT_CODE
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == _KEYS_COMMAND:
+        return keys_command(argv[1:])
     args = build_parser().parse_args(argv)
     if args.config:
         load_config()

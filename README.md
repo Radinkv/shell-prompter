@@ -44,23 +44,38 @@ pip install -e ".[gemini]"    # add Gemini
 pip install -e ".[all]"       # everything
 ```
 
-Set the API key for your provider:
+Set an API key for your provider (see [API keys](#api-keys)):
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, or GEMINI_API_KEY
+prompter keys set anthropic           # stores the key, input hidden
+# or just export the environment variable:
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### Publishing to PyPI
 
-The metadata in `pyproject.toml` is ready. Point `[project.urls]` at your
-repository, confirm the name `shell-prompter` is free on PyPI, then build and
-upload:
+The name `shell-prompter` is free on PyPI and the metadata in `pyproject.toml`
+is ready (point `[project.urls]` at your repository first). There are two ways
+to publish.
+
+Push a version tag and let CI do it. `.github/workflows/publish.yml` builds and
+uploads on any `v*` tag using PyPI Trusted Publishing, so there is no token to
+store. One-time setup: on PyPI, add a trusted publisher for the repo with
+workflow `publish.yml` and environment `pypi`. Then:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+Or publish by hand:
 
 ```bash
 pip install -e ".[dev]"   # build and twine come with the dev extra
 python -m build           # writes dist/*.whl and *.tar.gz
 twine upload dist/*       # needs a PyPI account and API token
 ```
+
+Once published, anyone can `pip install shell-prompter`.
 
 ## Config
 
@@ -116,6 +131,29 @@ Anthropic when you want it.
 > The Gemini adapter sends function results with role `tool`, matching the
 > current google-genai API. Run one live test per provider before relying on it;
 > OpenAI and Gemini were not run here.
+
+## API keys
+
+prompter needs an API key for the active provider. It looks in two places, in
+order:
+
+1. The environment variable for the provider (`ANTHROPIC_API_KEY`,
+   `OPENAI_API_KEY`, or `GEMINI_API_KEY`).
+2. A key you stored with `prompter keys`, in `~/.prompter/keys.json`.
+
+The environment variable always wins, so CI and one-off overrides keep working.
+
+Store a key once and forget about env vars:
+
+```bash
+prompter keys set anthropic     # prompts for the key, input hidden
+prompter keys list              # shows which providers have a key (masked)
+prompter keys clear anthropic   # removes a stored key
+```
+
+Stored keys live in `~/.prompter/keys.json` with file mode 0600 (readable only
+by you). It is plain text, the same approach as `~/.aws/credentials`. If you
+prefer not to store keys on disk, use the environment variable instead.
 
 ## Risk tiers and confirmation
 

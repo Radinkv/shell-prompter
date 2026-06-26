@@ -151,3 +151,52 @@ def test_main_dispatches_to_run(monkeypatch):
     monkeypatch.setattr(cli, "run", fake_run)
     assert cli.main(["do", "thing"]) == 0
     assert seen["ran"] is True
+
+
+# -- keys subcommand ---------------------------------------------------------
+@pytest.fixture
+def keys_path(tmp_path, monkeypatch):
+    from prompter import keys as keys_mod
+    path = tmp_path / "keys.json"
+    monkeypatch.setattr(keys_mod, "KEYS_PATH", str(path))
+    monkeypatch.setattr(cli, "KEYS_PATH", str(path))
+    return path
+
+
+def test_main_routes_keys_path(keys_path, capsys):
+    assert cli.main(["keys", "path"]) == cli.OK_EXIT_CODE
+    assert str(keys_path) in capsys.readouterr().out
+
+
+def test_keys_set_stores_key(keys_path, monkeypatch):
+    from prompter import keys as keys_mod
+    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt="": "sk-stored-9999")
+    assert cli.main(["keys", "set", "openai"]) == cli.OK_EXIT_CODE
+    assert keys_mod.stored_key("openai") == "sk-stored-9999"
+
+
+def test_keys_set_rejects_unknown_provider(keys_path, monkeypatch):
+    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt="": "x")
+    assert cli.main(["keys", "set", "bogus"]) == cli.ERROR_EXIT_CODE
+
+
+def test_keys_list_masks_stored(keys_path, monkeypatch, capsys):
+    from prompter import keys as keys_mod
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    keys_mod.set_key("openai", "sk-abcd1234")
+    assert cli.main(["keys", "list"]) == cli.OK_EXIT_CODE
+    out = capsys.readouterr().out
+    assert "openai" in out
+    assert "1234" in out          # masked tail shown
+    assert "sk-abcd1234" not in out  # full key never printed
+
+
+def test_keys_clear(keys_path):
+    from prompter import keys as keys_mod
+    keys_mod.set_key("gemini", "g")
+    assert cli.main(["keys", "clear", "gemini"]) == cli.OK_EXIT_CODE
+    assert keys_mod.stored_key("gemini") is None
+
+
+def test_keys_unknown_action(keys_path):
+    assert cli.main(["keys", "wat"]) == cli.ERROR_EXIT_CODE

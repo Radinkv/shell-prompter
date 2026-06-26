@@ -12,9 +12,8 @@ function-call round-trip with a live smoke test.
 
 from __future__ import annotations
 
-import os
-
 from ..config import PROVIDER_GEMINI, Config
+from ..keys import resolve_api_key
 from .base import (
     COMMAND_DESCRIPTION,
     EXPLANATION_DESCRIPTION,
@@ -180,7 +179,7 @@ def build(config: Config) -> GeminiProvider:
     genai = import_optional("google.genai", "gemini")
     types = import_optional("google.genai.types", "gemini")
     errors = import_optional("google.genai.errors", "gemini")
-    api_key = os.environ.get(config.api_key_env) if config.api_key_env else None
+    api_key = resolve_api_key(config)
     try:
         client = genai.Client(api_key=api_key) if api_key else genai.Client()
     except Exception as e:

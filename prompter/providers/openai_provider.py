@@ -12,9 +12,9 @@ tool-call deltas into the collector.
 from __future__ import annotations
 
 import json
-import os
 
 from ..config import PROVIDER_OPENAI, Config
+from ..keys import resolve_api_key
 from .base import (
     PARAM_COMMAND,
     PARAM_EXPLANATION,
@@ -148,7 +148,7 @@ class OpenAIProvider(ModelProvider):
 def build(config: Config) -> OpenAIProvider:
     sdk = import_optional("openai", "openai")
     kwargs = {}
-    api_key = os.environ.get(config.api_key_env) if config.api_key_env else None
+    api_key = resolve_api_key(config)
     if api_key:
         kwargs["api_key"] = api_key
     if config.base_url:

@@ -8,11 +8,10 @@ module needs it.
 
 from __future__ import annotations
 
-import os
-
 import anthropic
 
 from ..config import PROVIDER_ANTHROPIC, Config
+from ..keys import resolve_api_key
 from .base import (
     PARAM_COMMAND,
     PARAM_EXPLANATION,
@@ -141,7 +140,7 @@ class AnthropicProvider(ModelProvider):
 
 @register(PROVIDER_ANTHROPIC)
 def build(config: Config) -> AnthropicProvider:
-    api_key = os.environ.get(config.api_key_env) if config.api_key_env else None
+    api_key = resolve_api_key(config)
     try:
         client = (anthropic.Anthropic(api_key=api_key) if api_key
                   else anthropic.Anthropic())
