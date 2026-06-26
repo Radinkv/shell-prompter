@@ -72,7 +72,7 @@ def test_turn_collector():
 
 def test_import_optional_missing():
     with pytest.raises(base.ProviderNotInstalled):
-        base.import_optional("definitely_not_a_real_module_xyz", "extra")
+        base.import_optional("definitely_not_a_real_module_xyz")
 
 
 # ============================================================================

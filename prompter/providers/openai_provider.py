@@ -146,7 +146,7 @@ class OpenAIProvider(ModelProvider):
 
 @register(PROVIDER_OPENAI)
 def build(config: Config) -> OpenAIProvider:
-    sdk = import_optional("openai", "openai")
+    sdk = import_optional("openai")
     kwargs = {}
     api_key = resolve_api_key(config)
     if api_key:

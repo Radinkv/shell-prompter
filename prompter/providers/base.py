@@ -247,12 +247,16 @@ def known_providers() -> list[str]:
     return sorted(_FACTORIES)
 
 
-def import_optional(module_name: str, extra: str):
-    """Import an optional SDK, with an actionable error if it's missing."""
+def import_optional(module_name: str):
+    """Import a provider SDK, with an actionable error if it's missing.
+
+    The provider SDKs ship as core dependencies, so this only fires on a broken
+    or partial install.
+    """
     try:
         return importlib.import_module(module_name)
     except ImportError as e:
         raise ProviderNotInstalled(
-            f"The '{module_name}' package is required for this provider. "
-            f"Install it with:  pip install -e \".[{extra}]\""
+            f"The '{module_name}' package is missing. "
+            f"Reinstall prompter with:  pip install -e ."
         ) from e

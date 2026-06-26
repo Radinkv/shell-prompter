@@ -21,16 +21,16 @@ prompter can launch, not the thing you live inside.
 
 ## Install
 
-The distribution is `shell-prompter`. It installs one command, `prompter`.
-Anthropic ships in the base install. Add an extra for OpenAI or Gemini.
+The distribution is `shell-prompter`. It installs one command, `prompter`. One
+install includes all three providers (Anthropic, OpenAI, and Gemini).
 
 The easiest option is [pipx](https://pipx.pypa.io). It puts `prompter` on your
 PATH globally and keeps it isolated.
 
 ```bash
-pipx install ".[all]"
+pipx install .
 # or straight from GitHub once pushed:
-pipx install "git+https://github.com/radinkv/shell-prompter.git[all]"
+pipx install "git+https://github.com/Radinkv/shell-prompter.git"
 ```
 
 For working on the code, use an editable install in a venv.
@@ -38,10 +38,7 @@ For working on the code, use an editable install in a venv.
 ```bash
 cd shell-prompter
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e .              # Anthropic only
-pip install -e ".[openai]"    # add OpenAI, Groq, OpenRouter
-pip install -e ".[gemini]"    # add Gemini
-pip install -e ".[all]"       # everything
+pip install -e .
 ```
 
 Set an API key for your provider (see [API keys](#api-keys)):
@@ -116,11 +113,11 @@ The model backend sits behind one small interface, so prompter behaves the same
 whichever you pick. Switch with `provider` in config, or `--provider` for one
 run.
 
-| Provider | Install | Default model | API key | Notes |
-|----------|---------|---------------|---------|-------|
-| `anthropic` | base | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | Default. Also reads an `ant auth login` profile. |
-| `openai` | `.[openai]` | `gpt-5.4` | `OPENAI_API_KEY` | Set `base_url` for Groq or OpenRouter (both speak the OpenAI API). Drop to `gpt-5.4-mini` to go cheaper. |
-| `gemini` | `.[gemini]` | `gemini-3.5-flash` | `GEMINI_API_KEY` | Generous free tier, good for everyday use. |
+| Provider | Default model | API key | Notes |
+|----------|---------------|---------|-------|
+| `anthropic` | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | Default. Also reads an `ant auth login` profile. |
+| `openai` | `gpt-5.4` | `OPENAI_API_KEY` | Set `base_url` for Groq or OpenRouter (both speak the OpenAI API). Drop to `gpt-5.4-mini` to go cheaper. |
+| `gemini` | `gemini-3.5-flash` | `GEMINI_API_KEY` | Generous free tier, good for everyday use. |
 
 A note on billing. An Anthropic Pro or Max subscription and an API key are
 separate accounts. A program cannot bill against your web subscription. For a

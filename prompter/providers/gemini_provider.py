@@ -176,9 +176,9 @@ class GeminiProvider(ModelProvider):
 
 @register(PROVIDER_GEMINI)
 def build(config: Config) -> GeminiProvider:
-    genai = import_optional("google.genai", "gemini")
-    types = import_optional("google.genai.types", "gemini")
-    errors = import_optional("google.genai.errors", "gemini")
+    genai = import_optional("google.genai")
+    types = import_optional("google.genai.types")
+    errors = import_optional("google.genai.errors")
     api_key = resolve_api_key(config)
     try:
         client = genai.Client(api_key=api_key) if api_key else genai.Client()
