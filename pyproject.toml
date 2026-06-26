@@ -1,0 +1,19 @@
+[project]
+name = "prompter"
+version = "0.1.0"
+description = "A natural-language shell agent powered by Claude."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "anthropic>=0.40",
+]
+
+[project.scripts]
+prompter = "prompter:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["prompter"]

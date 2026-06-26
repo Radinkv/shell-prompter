@@ -1,0 +1,95 @@
+Metadata-Version: 2.4
+Name: prompter
+Version: 0.1.0
+Summary: A natural-language shell agent powered by Claude.
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: anthropic>=0.40
+
+# prompter
+
+A natural-language shell agent powered by Claude. You describe what you want in
+plain English; `prompter` figures out the shell commands, shows each one with a
+risk rating, asks before anything non-trivial, and runs them — tracking the
+working directory as it goes, just like a real shell session.
+
+```
+$ prompter "make a folder called scratch, cd into it, then run claude"
+$ prompter "download uv if it isn't installed, then print its version"
+$ prompter            # no prompt → interactive REPL
+```
+
+Unlike a coding agent (which lives inside one repo), prompter's workspace is
+your **whole shell**. Launching Claude Code, installing tools, cloning repos,
+converting files — it's all just commands it knows how to run. Claude Code
+becomes one of the tools prompter can invoke, not the thing you're inside of.
+
+## Install
+
+Requires Python 3.9+ and an Anthropic API key (or a saved `ant auth login`).
+
+```bash
+cd shell-prompter
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+export ANTHROPIC_API_KEY=sk-ant-...      # or run `ant auth login`
+```
+
+Now `prompter` is on your PATH (inside the venv). To use it from anywhere
+without activating the venv, install with [pipx](https://pipx.pypa.io) instead:
+
+```bash
+pipx install -e /path/to/shell-prompter
+```
+
+## How it works
+
+1. Your request + your OS, shell, and current directory go to Claude.
+2. Claude works toward the goal by calling a `run_command` tool, one command
+   at a time, reacting to each result before deciding the next step.
+3. Every proposed command is graded into a **risk tier**:
+
+   | Tier        | Examples                                        | Default behavior |
+   |-------------|-------------------------------------------------|------------------|
+   | 🟢 `SAFE`    | `ls`, `cd`, `mkdir`, `git status`, `cat`        | runs automatically |
+   | 🟡 `CONFIRM` | `brew install`, `pip install`, `git clone`, `mv`, `rm`, `curl` | asks first |
+   | 🔴 `DANGER`  | `rm -rf`, `sudo`, `curl … \| sh`, force-push, `dd` | asks first, in red |
+
+4. `cd` actually sticks: prompter tracks the working directory across commands,
+   so "make a folder, cd in, then run claude" lands you in the right place.
+
+> **Note on directories:** like any tool of this kind, prompter can't change the
+> directory of the *outer* shell you launched it from — that's an OS limitation.
+> But it runs every subsequent command (and launches Claude) in the right place,
+> which covers the workflows above.
+
+## Confirmation prompt
+
+When prompter asks, you can answer:
+
+- `y` / Enter — run this command
+- `n` — skip it (Claude is told and adapts)
+- `a` — run this and auto-approve the rest of this run
+- `q` — quit
+
+## Flags
+
+| Flag         | Effect                                                       |
+|--------------|-------------------------------------------------------------|
+| `--ask-all`  | Confirm **every** command, including safe ones.             |
+| `--yolo`     | Run everything with no confirmation. Dangerous — use sparingly. |
+| `--model ID` | Override the model (default `claude-opus-4-8`).             |
+
+## Interactive programs
+
+For things that take over the terminal — `claude`, `vim`, `ssh`, a Python REPL,
+`top` — prompter hands them the real terminal so you can interact, instead of
+capturing their output. Claude marks these calls automatically.
+
+## Safety notes
+
+- Commands come from a language model. The risk tiers and confirmation gate are
+  there so you stay in control; read what you're approving, especially 🔴 items.
+- `--yolo` removes that gate entirely. Only use it when you fully trust the task.
+- "Download and run this from the internet" (`curl … | sh`) is always flagged as
+  `DANGER`, because it executes code you haven't seen.

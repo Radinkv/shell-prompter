@@ -1,0 +1,2 @@
+[console_scripts]
+prompter = prompter:main
