@@ -32,9 +32,6 @@ def _ns(**kw):
     return types.SimpleNamespace(**kw)
 
 
-# ============================================================================
-# base: registry, collector, invocation helper
-# ============================================================================
 def test_known_providers_registered():
     assert set(known_providers()) >= {"anthropic", "openai", "gemini"}
 
@@ -75,9 +72,6 @@ def test_import_optional_missing():
         base.import_optional("definitely_not_a_real_module_xyz")
 
 
-# ============================================================================
-# Anthropic adapter
-# ============================================================================
 class _AnthropicStream:
     def __init__(self, events, final):
         self._events = events
@@ -177,9 +171,6 @@ def test_anthropic_other_typeerror_propagates():
         provider.complete([UserMessage("go")], ["sys"], False, lambda _t: None)
 
 
-# ============================================================================
-# OpenAI adapter
-# ============================================================================
 class _FakeOpenAIErrors:
     class AuthenticationError(Exception):
         pass
@@ -253,9 +244,6 @@ def test_openai_parse_args_bad_json():
     assert op._parse_args("") == {}
 
 
-# ============================================================================
-# Gemini adapter
-# ============================================================================
 class _FakePart:
     def __init__(self, text=None, function_call=None, function_response=None):
         self.text = text

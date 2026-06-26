@@ -23,7 +23,6 @@ def _agent(provider, shell, console, mode=ApprovalMode.YOLO, config=None):
     return Agent(provider, shell, console, config or Config(), mode)
 
 
-# -- CommandRequest ----------------------------------------------------------
 def test_request_infers_interactive():
     req = CommandRequest.from_invocation(ToolInvocation("c", "claude"))
     assert req.interactive is True
@@ -39,7 +38,6 @@ def test_request_plain_command_not_interactive():
     assert req.interactive is False
 
 
-# -- Conversation ------------------------------------------------------------
 def test_conversation_item_types():
     conv = Conversation()
     conv.add_user("hi")
@@ -49,7 +47,6 @@ def test_conversation_item_types():
         [UserMessage, AssistantMessage, ToolResultsMessage]
 
 
-# -- approval policy ---------------------------------------------------------
 def test_auto_approves_matrix(mock_console):
     agent = _agent(FakeProvider([]), FakeShell(), mock_console, ApprovalMode.SMART)
     assert agent._auto_approves(RiskTier.SAFE) is True
@@ -66,7 +63,6 @@ def test_auto_approves_matrix(mock_console):
     assert agent._auto_approves(RiskTier.CONFIRM) is True
 
 
-# -- the loop ----------------------------------------------------------------
 def test_run_turn_no_tools(mock_console):
     provider = FakeProvider([make_turn(text="done")])
     agent = _agent(provider, FakeShell(), mock_console)

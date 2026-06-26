@@ -93,4 +93,4 @@ def test_interactive_run_inherits_terminal(tmp_path, monkeypatch):
     monkeypatch.setattr(shell_mod.subprocess, "run", fake_run)
     result = Shell(cwd=str(tmp_path)).run("claude", interactive=True)
     assert result.exit_code == 0
-    assert "capture_output" not in captured["kwargs"]  # terminal inherited
+    assert "capture_output" not in captured["kwargs"]

@@ -1,14 +1,16 @@
 """Stored API keys at ~/.prompter/keys.json.
 
-An alternative to exporting environment variables. `prompter keys set <provider>`
-writes a key here with file mode 0600. At runtime an environment variable still
-wins over a stored key, so CI and one-off overrides keep working.
+An alternative to exporting environment variables. `prompter keys add <provider>
+<key>` writes a key here with file mode 0600. At runtime an environment variable
+still wins over a stored key, so CI and one-off overrides keep working.
 """
 
 from __future__ import annotations
 
 import json
 import os
+
+from .constants import FILE_WRITE_MODE, JSON_INDENT
 
 KEYS_PATH = os.path.expanduser("~/.prompter/keys.json")
 _FILE_MODE = 0o600
@@ -24,8 +26,8 @@ def load_keys() -> dict:
 
 def save_keys(keys: dict) -> None:
     os.makedirs(os.path.dirname(KEYS_PATH), exist_ok=True)
-    with open(KEYS_PATH, "w") as f:
-        json.dump(keys, f, indent=2)
+    with open(KEYS_PATH, FILE_WRITE_MODE) as f:
+        json.dump(keys, f, indent=JSON_INDENT)
     os.chmod(KEYS_PATH, _FILE_MODE)
 
 

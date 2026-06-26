@@ -37,7 +37,6 @@ def test_classify_returns_reason():
 
 
 def test_danger_checked_before_confirm():
-    # `sudo rm` matches both a danger and a confirm rule; danger must win.
     assert classify("sudo rm -rf /").tier is RiskTier.DANGER
     assert RISK_REGISTRY[0][0] is RiskTier.DANGER
 

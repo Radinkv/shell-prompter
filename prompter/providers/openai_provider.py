@@ -4,8 +4,8 @@ Uses the Chat Completions API with function tools and streaming. Because Groq
 and OpenRouter implement the same API, pointing ``base_url`` at them reuses this
 adapter unchanged.
 
-Supplies the template method's two steps: build_request renders neutral history
-into Chat Completions messages; run_stream accumulates streamed text and
+Supplies the template method's two steps. build_request renders neutral history
+into Chat Completions messages. run_stream accumulates streamed text and
 tool-call deltas into the collector.
 """
 
@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 
 from ..config import PROVIDER_OPENAI, Config
+from ..constants import EMPTY
 from ..keys import resolve_api_key
 from .base import (
     PARAM_COMMAND,
@@ -40,11 +41,33 @@ _ROLE_USER = "user"
 _ROLE_ASSISTANT = "assistant"
 _ROLE_TOOL = "tool"
 _FUNCTION_TYPE = "function"
+
 _TOOL_KEY_TYPE = "type"
 _TOOL_KEY_FUNCTION = "function"
 _TOOL_KEY_NAME = "name"
 _TOOL_KEY_DESCRIPTION = "description"
 _TOOL_KEY_PARAMETERS = "parameters"
+
+_FIELD_ROLE = "role"
+_FIELD_CONTENT = "content"
+_FIELD_TOOL_CALL_ID = "tool_call_id"
+_FIELD_TOOL_CALLS = "tool_calls"
+_FIELD_ID = "id"
+_FIELD_ARGUMENTS = "arguments"
+_ATTR_FUNCTION = "function"
+_RESP_CHOICES = "choices"
+
+_SLOT_ID = "id"
+_SLOT_ARGS = "args"
+
+_REQ_MODEL = "model"
+_REQ_MESSAGES = "messages"
+_REQ_STREAM = "stream"
+_REQ_TOOLS = "tools"
+
+_MODULE_OPENAI = "openai"
+_KW_API_KEY = "api_key"
+_KW_BASE_URL = "base_url"
 
 _FUNCTION_TOOL = {
     _TOOL_KEY_TYPE: _FUNCTION_TYPE,
@@ -59,32 +82,32 @@ _CLIENT_INIT_ERROR = "Could not initialize the OpenAI client: {error}"
 
 
 def _to_messages(system_texts: list[str], history: list[HistoryItem]) -> list[dict]:
-    messages = [{"role": _ROLE_SYSTEM,
-                 "content": SYSTEM_TEXT_SEPARATOR.join(system_texts)}]
+    messages = [{_FIELD_ROLE: _ROLE_SYSTEM,
+                 _FIELD_CONTENT: SYSTEM_TEXT_SEPARATOR.join(system_texts)}]
     for item in history:
         if isinstance(item, UserMessage):
-            messages.append({"role": _ROLE_USER, "content": item.text})
+            messages.append({_FIELD_ROLE: _ROLE_USER, _FIELD_CONTENT: item.text})
         elif isinstance(item, AssistantMessage):
             messages.append(_assistant_message(item))
         elif isinstance(item, ToolResultsMessage):
             for result in item.results:
                 messages.append({
-                    "role": _ROLE_TOOL,
-                    "tool_call_id": result.call_id,
-                    "content": result.content,
+                    _FIELD_ROLE: _ROLE_TOOL,
+                    _FIELD_TOOL_CALL_ID: result.call_id,
+                    _FIELD_CONTENT: result.content,
                 })
     return messages
 
 
 def _assistant_message(item: AssistantMessage) -> dict:
-    message = {"role": _ROLE_ASSISTANT, "content": item.text or None}
+    message = {_FIELD_ROLE: _ROLE_ASSISTANT, _FIELD_CONTENT: item.text or None}
     if item.tool_calls:
-        message["tool_calls"] = [{
-            "id": call.call_id,
-            "type": _FUNCTION_TYPE,
-            "function": {
-                "name": TOOL_NAME,
-                "arguments": json.dumps({
+        message[_FIELD_TOOL_CALLS] = [{
+            _FIELD_ID: call.call_id,
+            _TOOL_KEY_TYPE: _FUNCTION_TYPE,
+            _TOOL_KEY_FUNCTION: {
+                _TOOL_KEY_NAME: TOOL_NAME,
+                _FIELD_ARGUMENTS: json.dumps({
                     PARAM_COMMAND: call.command,
                     PARAM_EXPLANATION: call.explanation,
                     PARAM_INTERACTIVE: call.interactive,
@@ -102,13 +125,13 @@ def _parse_args(raw: str) -> dict:
 
 
 def _accumulate_tool_deltas(delta, accumulated: dict) -> None:
-    for call in getattr(delta, "tool_calls", None) or []:
-        slot = accumulated.setdefault(call.index, {"id": "", "args": ""})
-        if getattr(call, "id", None):
-            slot["id"] = call.id
-        function = getattr(call, "function", None)
-        if function and getattr(function, "arguments", None):
-            slot["args"] += function.arguments
+    for call in getattr(delta, _FIELD_TOOL_CALLS, None) or []:
+        slot = accumulated.setdefault(call.index, {_SLOT_ID: EMPTY, _SLOT_ARGS: EMPTY})
+        if getattr(call, _FIELD_ID, None):
+            slot[_SLOT_ID] = call.id
+        function = getattr(call, _ATTR_FUNCTION, None)
+        if function and getattr(function, _FIELD_ARGUMENTS, None):
+            slot[_SLOT_ARGS] += function.arguments
 
 
 class OpenAIProvider(ModelProvider):
@@ -122,37 +145,37 @@ class OpenAIProvider(ModelProvider):
 
     def build_request(self, history, system_texts, disable_tools) -> dict:
         request = {
-            "model": self.model,
-            "messages": _to_messages(system_texts, history),
-            "stream": True,
+            _REQ_MODEL: self.model,
+            _REQ_MESSAGES: _to_messages(system_texts, history),
+            _REQ_STREAM: True,
         }
         if not disable_tools:
-            request["tools"] = [_FUNCTION_TOOL]
+            request[_REQ_TOOLS] = [_FUNCTION_TOOL]
         return request
 
     def run_stream(self, request, collector: TurnCollector) -> None:
         accumulated: dict[int, dict] = {}
         for chunk in self._client.chat.completions.create(**request):
-            choices = getattr(chunk, "choices", None) or []
+            choices = getattr(chunk, _RESP_CHOICES, None) or []
             if not choices:
                 continue
             delta = choices[0].delta
-            collector.add_text(getattr(delta, "content", None))
+            collector.add_text(getattr(delta, _FIELD_CONTENT, None))
             _accumulate_tool_deltas(delta, accumulated)
         for index, slot in accumulated.items():
-            call_id = slot["id"] or fallback_call_id(index)
-            collector.add_tool_call(call_id, _parse_args(slot["args"]))
+            call_id = slot[_SLOT_ID] or fallback_call_id(index)
+            collector.add_tool_call(call_id, _parse_args(slot[_SLOT_ARGS]))
 
 
 @register(PROVIDER_OPENAI)
 def build(config: Config) -> OpenAIProvider:
-    sdk = import_optional("openai")
+    sdk = import_optional(_MODULE_OPENAI)
     kwargs = {}
     api_key = resolve_api_key(config)
     if api_key:
-        kwargs["api_key"] = api_key
+        kwargs[_KW_API_KEY] = api_key
     if config.base_url:
-        kwargs["base_url"] = config.base_url
+        kwargs[_KW_BASE_URL] = config.base_url
     try:
         client = sdk.OpenAI(**kwargs)
     except Exception as e:

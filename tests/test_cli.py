@@ -1,107 +1,71 @@
-"""Unit tests for argument parsing, override resolution, and error dispatch."""
+"""Unit tests for the command dispatcher, run setup, and the subcommands."""
 
 from __future__ import annotations
 
-import types
 from unittest.mock import MagicMock
 
 import pytest
 
 from prompter import cli
-from prompter.agent import QuitRequested
 from prompter.config import ApprovalMode, Config
 from prompter.providers.base import ProviderAuthError, ProviderError
 from prompter.ui import Console
 
 
-def test_parser_defaults():
-    args = cli.build_parser().parse_args([])
-    assert args.prompt == []
-    assert args.provider is None
-    assert args.model is None
-    assert args.yolo is False
+def parse(argv):
+    return cli._run_parser().parse_args(argv)
 
 
-def test_parser_collects_prompt_and_flags():
-    args = cli.build_parser().parse_args(["make", "a", "thing", "--yolo"])
-    assert args.prompt == ["make", "a", "thing"]
-    assert args.yolo is True
+@pytest.fixture
+def isolated(tmp_path, monkeypatch):
+    """Point config and keys storage at temp files."""
+    from prompter import config as config_mod
+    from prompter import keys as keys_mod
+    config_path = str(tmp_path / "config.json")
+    keys_path = str(tmp_path / "keys.json")
+    monkeypatch.setattr(config_mod, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(cli, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(keys_mod, "KEYS_PATH", keys_path)
+    monkeypatch.setattr(cli, "KEYS_PATH", keys_path)
+    return tmp_path
 
 
-def test_apply_overrides_resolves_default_model():
-    args = cli.build_parser().parse_args([])
+def _raise_provider_error(_config):
+    raise ProviderError("no key")
+
+
+def test_resolves_default_model():
     cfg = Config()
-    cli._apply_overrides(args, cfg)
+    cli._apply_overrides(parse([]), cfg)
     assert cfg.model == "claude-sonnet-4-6"
 
 
-def test_apply_overrides_provider_changes_default_model():
-    args = cli.build_parser().parse_args(["--provider", "openai"])
-    cfg = Config()
-    cli._apply_overrides(args, cfg)
-    assert cfg.provider == "openai"
-    assert cfg.model == "gpt-5.4"
+def test_switching_provider_drops_other_providers_pinned_model():
+    cfg = Config(provider="anthropic", model="claude-sonnet-4-6")
+    cli._apply_overrides(parse(["--provider", "gemini"]), cfg)
+    assert cfg.model == "gemini-3.5-flash"
 
 
-def test_apply_overrides_model_flag_wins():
-    args = cli.build_parser().parse_args(["--provider", "gemini", "--model", "x"])
-    cfg = Config()
-    cli._apply_overrides(args, cfg)
-    assert cfg.model == "x"
+def test_pinned_model_kept_when_provider_matches():
+    cfg = Config(provider="gemini", model="gemini-1.5-pro")
+    cli._apply_overrides(parse([]), cfg)
+    assert cfg.model == "gemini-1.5-pro"
 
 
-def test_apply_overrides_base_url_and_workspace():
-    args = cli.build_parser().parse_args(
-        ["--base-url", "https://groq", "--workspace", "~/P", "--max-fix", "7"])
-    cfg = Config()
-    cli._apply_overrides(args, cfg)
-    assert cfg.base_url == "https://groq"
-    assert cfg.default_workspace == "~/P"
-    assert cfg.max_fix_attempts == 7
-
-
-@pytest.mark.parametrize("value", [
-    "gemini", "openai", "anthropic", "claude", "gpt", "google", "Gemini"])
-def test_model_that_is_a_provider_name_is_rejected(value):
-    args = cli.build_parser().parse_args(["--model", value])
-    with pytest.raises(SystemExit):
-        cli._reject_provider_as_model(args)
-
-
-@pytest.mark.parametrize("argv", [[], ["--model", "gemini-3.5-flash"]])
-def test_valid_model_passes_validation(argv):
-    cli._reject_provider_as_model(cli.build_parser().parse_args(argv))
+def test_model_flag_wins():
+    cfg = Config(provider="anthropic", model="claude-sonnet-4-6")
+    cli._apply_overrides(parse(["--provider", "gemini", "--model", "g-x"]), cfg)
+    assert cfg.model == "g-x"
 
 
 @pytest.mark.parametrize("given, expected", [
-    ("Gemini", "gemini"),
-    ("OPENAI", "openai"),
-    ("claude", "anthropic"),
-    ("gpt", "openai"),
-    ("google", "gemini"),
+    ("Gemini", "gemini"), ("OPENAI", "openai"), ("claude", "anthropic"),
+    ("gpt", "openai"), ("google", "gemini"),
 ])
-def test_apply_overrides_normalizes_provider(given, expected):
-    args = cli.build_parser().parse_args(["--provider", given])
+def test_normalizes_provider(given, expected):
     cfg = Config()
-    cli._apply_overrides(args, cfg)
+    cli._apply_overrides(parse(["--provider", given]), cfg)
     assert cfg.provider == expected
-
-
-def test_validate_rejects_zero_max_fix():
-    with pytest.raises(SystemExit):
-        cli._validate_config(Config(max_fix_attempts=0), MagicMock(spec=Console))
-
-
-def test_validate_warns_base_url_for_non_openai():
-    console = MagicMock(spec=Console)
-    cli._validate_config(Config(base_url="https://x", provider="gemini"), console)
-    console.note.assert_called_once()
-
-
-def test_validate_no_warn_base_url_for_openai():
-    console = MagicMock(spec=Console)
-    cli._validate_config(Config(base_url="https://x", provider="openai"), console)
-    console.note.assert_not_called()
 
 
 @pytest.mark.parametrize("argv, mode", [
@@ -110,206 +74,214 @@ def test_validate_no_warn_base_url_for_openai():
     (["--yolo"], ApprovalMode.YOLO),
 ])
 def test_resolve_mode(argv, mode):
-    args = cli.build_parser().parse_args(argv)
-    assert cli._resolve_mode(args, Config()) is mode
+    assert cli._resolve_mode(parse(argv), Config()) is mode
 
 
-def test_resolve_mode_config_disables_auto_approve():
-    args = cli.build_parser().parse_args([])
-    assert cli._resolve_mode(args, Config(auto_approve_safe=False)) is ApprovalMode.ASK_ALL
+@pytest.mark.parametrize("value", [
+    "gemini", "openai", "anthropic", "claude", "gpt", "google", "Gemini"])
+def test_model_that_is_a_provider_rejected(value):
+    with pytest.raises(cli._CommandError):
+        cli._reject_provider_as_model(parse(["--model", value]))
 
 
-# -- error-handler registry --------------------------------------------------
-def test_error_registry_structure():
-    assert cli._ERROR_HANDLERS[0][0] == (KeyboardInterrupt, QuitRequested)
-    assert cli._ERROR_HANDLERS[1] == (ProviderError, cli._handle_api)
+@pytest.mark.parametrize("argv", [[], ["--model", "gemini-3.5-flash"]])
+def test_valid_model_passes(argv):
+    cli._reject_provider_as_model(parse(argv))
 
 
-def test_handlers_return_codes():
+def test_validate_rejects_bad_max_fix():
+    with pytest.raises(cli._CommandError):
+        cli._validate_config(Config(max_fix_attempts=0), MagicMock(spec=Console))
+
+
+def test_validate_warns_base_url_for_non_openai():
     console = MagicMock(spec=Console)
-    assert cli._handle_interrupt(console, KeyboardInterrupt()) == cli.SIGINT_EXIT_CODE
-    console.stopped.assert_called_once()
-    assert cli._handle_auth(console, ProviderAuthError()) == cli.ERROR_EXIT_CODE
-    assert cli._handle_api(console, ProviderError("x")) == cli.ERROR_EXIT_CODE
+    cli._validate_config(Config(base_url="x", provider="gemini"), console)
+    console.note.assert_called_once()
 
 
-def _stub_run(monkeypatch, dispatch):
-    monkeypatch.setattr(cli, "load_config", lambda: Config())
-    monkeypatch.setattr(
-        cli, "make_agent",
-        lambda args, config, console: types.SimpleNamespace(mode=ApprovalMode.SMART),
-    )
-    monkeypatch.setattr(cli, "_dispatch", dispatch)
+def test_validate_no_warn_base_url_for_openai():
+    console = MagicMock(spec=Console)
+    cli._validate_config(Config(base_url="x", provider="openai"), console)
+    console.note.assert_not_called()
 
 
-def test_run_dispatches_interrupt(monkeypatch):
-    def boom(agent, goal):
+def test_create_unknown_provider_raises():
+    with pytest.raises(cli._CommandError):
+        cli._create_provider_checked(Config(provider="bogus"))
+
+
+def test_create_missing_key_raises(monkeypatch):
+    monkeypatch.setattr(cli, "create_provider", _raise_provider_error)
+    with pytest.raises(cli._CommandError):
+        cli._create_provider_checked(Config(provider="openai"))
+
+
+def test_create_success(monkeypatch):
+    monkeypatch.setattr(cli, "create_provider", lambda c: "PROVIDER")
+    assert cli._create_provider_checked(Config(provider="openai")) == "PROVIDER"
+
+
+def test_run_agent_ok(monkeypatch):
+    monkeypatch.setattr(cli, "_dispatch", lambda a, g: None)
+    assert cli._run_agent(MagicMock(), Config(), MagicMock(spec=Console), "x") \
+        == cli.OK_EXIT_CODE
+
+
+def test_run_agent_interrupt(monkeypatch):
+    def boom(a, g):
         raise KeyboardInterrupt
-
-    _stub_run(monkeypatch, boom)
-    args = cli.build_parser().parse_args([])
-    assert cli.run(args, MagicMock(spec=Console)) == cli.SIGINT_EXIT_CODE
-
-
-def test_run_reraises_unmapped(monkeypatch):
-    def boom(agent, goal):
-        raise ValueError("unexpected")
-
-    _stub_run(monkeypatch, boom)
-    args = cli.build_parser().parse_args([])
-    with pytest.raises(ValueError):
-        cli.run(args, MagicMock(spec=Console))
-
-
-def test_run_returns_ok(monkeypatch):
-    _stub_run(monkeypatch, lambda agent, goal: None)
-    args = cli.build_parser().parse_args([])
-    assert cli.run(args, MagicMock(spec=Console)) == cli.OK_EXIT_CODE
-
-
-def test_run_auth_prompt_blank_exits(monkeypatch, capsys):
-    def boom(agent, goal):
-        raise ProviderAuthError("no key")
-
-    _stub_run(monkeypatch, boom)
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _p="": "")
-    args = cli.build_parser().parse_args([])
-    assert cli.run(args, MagicMock(spec=Console)) == cli.ERROR_EXIT_CODE
-    assert "keys set" in capsys.readouterr().err
-
-
-def test_run_auth_rejected_key_uses_handler(monkeypatch, keys_path):
-    def boom(agent, goal):
-        raise ProviderAuthError("bad key")
-
-    _stub_run(monkeypatch, boom)
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _p="": "sk-wrong-0000")
+    monkeypatch.setattr(cli, "_dispatch", boom)
     console = MagicMock(spec=Console)
-    args = cli.build_parser().parse_args([])
-    assert cli.run(args, console) == cli.ERROR_EXIT_CODE
-    console.auth_error.assert_called_once()
+    assert cli._run_agent(MagicMock(), Config(), console, "x") == cli.SIGINT_EXIT_CODE
+    console.stopped.assert_called_once()
 
 
-def test_run_auth_retries_after_key(monkeypatch, keys_path):
-    from prompter import keys as keys_mod
-    calls = {"n": 0}
-
-    def dispatch(agent, goal):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise ProviderAuthError("no key")
-
-    _stub_run(monkeypatch, dispatch)
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _p="": "sk-retry-2222")
-    args = cli.build_parser().parse_args([])
-    assert cli.run(args, MagicMock(spec=Console)) == cli.OK_EXIT_CODE
-    assert keys_mod.stored_key("anthropic") == "sk-retry-2222"
+def test_run_agent_auth_shows_missing_key(monkeypatch):
+    def boom(a, g):
+        raise ProviderAuthError("no key")
+    monkeypatch.setattr(cli, "_dispatch", boom)
+    console = MagicMock(spec=Console)
+    assert cli._run_agent(MagicMock(), Config(provider="anthropic"), console, "x") \
+        == cli.ERROR_EXIT_CODE
+    console.problem.assert_called_once()
 
 
-# -- main --------------------------------------------------------------------
-def test_main_config_prints_path(monkeypatch, capsys):
-    monkeypatch.setattr(cli, "load_config", lambda: Config())
-    monkeypatch.setattr(cli, "CONFIG_PATH", "/tmp/foo.json")
-    assert cli.main(["--config"]) == cli.OK_EXIT_CODE
-    assert "/tmp/foo.json" in capsys.readouterr().out
+def test_run_agent_model_404_shows_problem(monkeypatch):
+    def boom(a, g):
+        raise ProviderError("models/x is not found for API version v1beta")
+    monkeypatch.setattr(cli, "_dispatch", boom)
+    console = MagicMock(spec=Console)
+    assert cli._run_agent(MagicMock(), Config(provider="gemini", model="x"),
+                          console, "x") == cli.ERROR_EXIT_CODE
+    console.problem.assert_called_once()
 
 
-def test_main_dispatches_to_run(monkeypatch):
+def test_cmd_run_renders_command_error(monkeypatch):
+    def boom(args, console):
+        raise cli._CommandError("boom", [("x", "y")])
+    monkeypatch.setattr(cli, "_prepare", boom)
+    console = MagicMock(spec=Console)
+    assert cli.cmd_run(["hi"], console) == cli.ERROR_EXIT_CODE
+    console.problem.assert_called_once()
+
+
+def test_keys_add_stores(isolated):
+    from prompter import keys
+    console = MagicMock(spec=Console)
+    assert cli.cmd_keys(["add", "Gemini", "AIza-x"], console) == cli.OK_EXIT_CODE
+    assert keys.stored_key("gemini") == "AIza-x"
+    console.success.assert_called_once()
+
+
+def test_keys_add_unknown_provider(isolated):
+    console = MagicMock(spec=Console)
+    assert cli.cmd_keys(["add", "bogus", "k"], console) == cli.ERROR_EXIT_CODE
+    console.problem.assert_called_once()
+
+
+def test_keys_add_usage(isolated):
+    console = MagicMock(spec=Console)
+    assert cli.cmd_keys(["add", "gemini"], console) == cli.ERROR_EXIT_CODE
+    console.problem.assert_called_once()
+
+
+def test_keys_list(isolated):
+    console = MagicMock(spec=Console)
+    assert cli.cmd_keys(["list"], console) == cli.OK_EXIT_CODE
+    assert console.key_status.call_count == 3
+
+
+def test_keys_remove(isolated):
+    from prompter import keys
+    keys.set_key("gemini", "g")
+    console = MagicMock(spec=Console)
+    assert cli.cmd_keys(["remove", "gemini"], console) == cli.OK_EXIT_CODE
+    assert keys.stored_key("gemini") is None
+
+
+def test_keys_unknown_action(isolated):
+    console = MagicMock(spec=Console)
+    assert cli.cmd_keys(["wat"], console) == cli.ERROR_EXIT_CODE
+    console.problem.assert_called_once()
+
+
+def test_use_sets_default(isolated):
+    from prompter import config as config_mod
+    console = MagicMock(spec=Console)
+    assert cli.cmd_use(["gemini"], console) == cli.OK_EXIT_CODE
+    saved = config_mod.load_config()
+    assert saved.provider == "gemini"
+    assert saved.model == ""
+    assert saved.resolved_model == "gemini-3.5-flash"
+    console.success.assert_called_once()
+
+
+def test_use_with_model(isolated):
+    from prompter import config as config_mod
+    cli.cmd_use(["gemini", "gemini-1.5-pro"], MagicMock(spec=Console))
+    assert config_mod.load_config().model == "gemini-1.5-pro"
+
+
+def test_use_unknown_provider(isolated):
+    console = MagicMock(spec=Console)
+    assert cli.cmd_use(["bogus"], console) == cli.ERROR_EXIT_CODE
+    console.problem.assert_called_once()
+
+
+def test_use_usage(isolated):
+    console = MagicMock(spec=Console)
+    assert cli.cmd_use([], console) == cli.ERROR_EXIT_CODE
+    console.problem.assert_called_once()
+
+
+def test_status(isolated):
+    console = MagicMock(spec=Console)
+    assert cli.cmd_status([], console) == cli.OK_EXIT_CODE
+    assert console.field.call_count == 5
+    assert console.key_status.call_count == 3
+
+
+def test_config_prints_path(isolated):
+    console = MagicMock(spec=Console)
+    assert cli.cmd_config([], console) == cli.OK_EXIT_CODE
+    console.info.assert_called_once_with(cli.CONFIG_PATH)
+
+
+def test_help():
+    console = MagicMock(spec=Console)
+    assert cli.cmd_help(console) == cli.OK_EXIT_CODE
+    console.info.assert_called_once()
+    assert "prompter keys add" in console.info.call_args[0][0]
+
+
+def test_main_routes_to_keys(isolated):
+    assert cli.main(["keys", "list"]) == cli.OK_EXIT_CODE
+
+
+def test_main_help_flag(capsys):
+    assert cli.main(["--help"]) == cli.OK_EXIT_CODE
+    assert "Manage:" in capsys.readouterr().out
+
+
+def test_main_config(isolated, capsys):
+    assert cli.main(["config"]) == cli.OK_EXIT_CODE
+    assert str(isolated) in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("argv, expected", [
+    (["do", "thing"], ["do", "thing"]),
+    (["run", "do"], ["do"]),
+    ([], []),
+    (["xyz"], ["xyz"]),
+])
+def test_main_run_dispatch(monkeypatch, argv, expected):
     seen = {}
 
-    def fake_run(args, console):
-        seen["ran"] = True
+    def fake_run(rest, console):
+        seen["argv"] = rest
         return 0
 
-    monkeypatch.setattr(cli, "run", fake_run)
-    assert cli.main(["do", "thing"]) == 0
-    assert seen["ran"] is True
-
-
-# -- keys subcommand ---------------------------------------------------------
-@pytest.fixture
-def keys_path(tmp_path, monkeypatch):
-    from prompter import keys as keys_mod
-    path = tmp_path / "keys.json"
-    monkeypatch.setattr(keys_mod, "KEYS_PATH", str(path))
-    monkeypatch.setattr(cli, "KEYS_PATH", str(path))
-    return path
-
-
-def test_main_routes_keys_path(keys_path, capsys):
-    assert cli.main(["keys", "path"]) == cli.OK_EXIT_CODE
-    assert str(keys_path) in capsys.readouterr().out
-
-
-def test_keys_set_stores_key(keys_path, monkeypatch):
-    from prompter import keys as keys_mod
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt="": "sk-stored-9999")
-    assert cli.main(["keys", "set", "openai"]) == cli.OK_EXIT_CODE
-    assert keys_mod.stored_key("openai") == "sk-stored-9999"
-
-
-def test_keys_set_rejects_unknown_provider(keys_path, monkeypatch):
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _prompt="": "x")
-    assert cli.main(["keys", "set", "bogus"]) == cli.ERROR_EXIT_CODE
-
-
-def test_keys_list_masks_stored(keys_path, monkeypatch, capsys):
-    from prompter import keys as keys_mod
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    keys_mod.set_key("openai", "sk-abcd1234")
-    assert cli.main(["keys", "list"]) == cli.OK_EXIT_CODE
-    out = capsys.readouterr().out
-    assert "openai" in out
-    assert "1234" in out          # masked tail shown
-    assert "sk-abcd1234" not in out  # full key never printed
-
-
-def test_keys_clear(keys_path):
-    from prompter import keys as keys_mod
-    keys_mod.set_key("gemini", "g")
-    assert cli.main(["keys", "clear", "gemini"]) == cli.OK_EXIT_CODE
-    assert keys_mod.stored_key("gemini") is None
-
-
-def test_keys_unknown_action(keys_path):
-    assert cli.main(["keys", "wat"]) == cli.ERROR_EXIT_CODE
-
-
-# -- missing-key prompt flow -------------------------------------------------
-def _raise_provider_error(_config):
-    from prompter.providers.base import ProviderError
-    raise ProviderError("missing key")
-
-
-def test_provider_created_when_key_present(monkeypatch, keys_path):
-    monkeypatch.setattr(cli, "create_provider", lambda c: "PROVIDER")
-    assert cli._create_provider_or_prompt(Config(provider="openai")) == "PROVIDER"
-
-
-def test_provider_prompts_then_retries(monkeypatch, keys_path):
-    from prompter import keys as keys_mod
-    calls = {"n": 0}
-
-    def flaky_create(config):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            from prompter.providers.base import ProviderError
-            raise ProviderError("missing key")
-        return "PROVIDER"
-
-    monkeypatch.setattr(cli, "create_provider", flaky_create)
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _p="": "sk-entered-1111")
-    assert cli._create_provider_or_prompt(Config(provider="openai")) == "PROVIDER"
-    assert keys_mod.stored_key("openai") == "sk-entered-1111"
-
-
-def test_provider_blank_key_exits(monkeypatch, keys_path):
-    monkeypatch.setattr(cli, "create_provider", _raise_provider_error)
-    monkeypatch.setattr(cli.getpass, "getpass", lambda _p="": "")
-    with pytest.raises(SystemExit):
-        cli._create_provider_or_prompt(Config(provider="openai"))
-
-
-def test_provider_unknown_exits_without_prompting(keys_path):
-    with pytest.raises(SystemExit):
-        cli._create_provider_or_prompt(Config(provider="bogus"))
+    monkeypatch.setattr(cli, "cmd_run", fake_run)
+    assert cli.main(argv) == 0
+    assert seen["argv"] == expected

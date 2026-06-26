@@ -1,7 +1,7 @@
 """Fakes and factories shared across the test modules.
 
-These stand in for the collaborators the agent has injected — a model provider
-and a shell — so the loop can be exercised without a network, an API key, or a
+These stand in for the collaborators the agent has injected, a model provider
+and a shell, so the loop can be exercised without a network, an API key, or a
 real subprocess.
 """
 
@@ -37,7 +37,7 @@ class FakeShell:
 
 
 class FakeProvider:
-    """Returns queued AssistantTurns; records the disable_tools flag per call."""
+    """Returns queued AssistantTurns and records the disable_tools flag per call."""
 
     name = "fake"
     model = "fake-model"

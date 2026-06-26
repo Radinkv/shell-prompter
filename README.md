@@ -11,8 +11,10 @@ endpoint such as Groq or OpenRouter), or Gemini.
 ```
 $ prompter "make a folder called scratch, cd into it, then run claude"
 $ prompter "download uv if it isn't installed, then print its version"
-$ prompter            # no prompt: starts an interactive REPL
+$ prompter
 ```
+
+Run `prompter` with no goal to start an interactive REPL.
 
 A coding agent lives inside one repository. prompter works on your whole shell.
 Launching a coding agent, installing tools, cloning repos, converting files: it
@@ -21,19 +23,16 @@ prompter can launch, not the thing you live inside.
 
 ## Install
 
-The distribution is `shell-prompter`. It installs one command, `prompter`. One
-install includes all three providers (Anthropic, OpenAI, and Gemini).
+The distribution is `shell-prompter` and it installs one command, `prompter`. A
+single install includes all three providers (Anthropic, OpenAI, and Gemini).
 
-The easiest option is [pipx](https://pipx.pypa.io). It puts `prompter` on your
-PATH globally and keeps it isolated.
+Install it globally with [pipx](https://pipx.pypa.io):
 
 ```bash
-pipx install .
-# or straight from GitHub once pushed:
 pipx install "git+https://github.com/Radinkv/shell-prompter.git"
 ```
 
-For working on the code, use an editable install in a venv.
+To work on the code instead, use an editable install in a virtual environment:
 
 ```bash
 cd shell-prompter
@@ -41,38 +40,14 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
-Set an API key for your provider (see [API keys](#api-keys)):
+Then add an API key for your provider:
 
 ```bash
-prompter keys set anthropic           # stores the key, input hidden
-# or just export the environment variable:
-export ANTHROPIC_API_KEY=sk-ant-...
+prompter keys add anthropic sk-ant-...
 ```
 
-### Publishing to PyPI
-
-The name `shell-prompter` is free on PyPI and the metadata in `pyproject.toml`
-is ready (point `[project.urls]` at your repository first). There are two ways
-to publish.
-
-Push a version tag and let CI do it. `.github/workflows/publish.yml` builds and
-uploads on any `v*` tag using PyPI Trusted Publishing, so there is no token to
-store. One-time setup: on PyPI, add a trusted publisher for the repo with
-workflow `publish.yml` and environment `pypi`. Then:
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
-
-Or publish by hand:
-
-```bash
-pip install -e ".[dev]"   # build and twine come with the dev extra
-python -m build           # writes dist/*.whl and *.tar.gz
-twine upload dist/*       # needs a PyPI account and API token
-```
-
-Once published, anyone can `pip install shell-prompter`.
+Or export the matching environment variable (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, or `GEMINI_API_KEY`). See [API keys](#api-keys).
 
 ## Config
 
@@ -97,22 +72,23 @@ On first run prompter writes `~/.prompter/config.json`:
 |-----|--------------|
 | `default_workspace` | Where new projects go when you don't say where. `prompter "make a project called hunchday"` creates `~/Code/hunchday`, not a folder in the current directory. |
 | `provider` | `anthropic`, `openai`, or `gemini`. See [Providers](#providers). |
-| `model` | Empty means "use the provider's default" (listed in the Providers table). Set it to pin a model. |
+| `model` | Empty means use the provider's default (listed in the Providers table). Set it to pin a model. |
 | `base_url` | Points the OpenAI adapter at a compatible endpoint such as Groq or OpenRouter. Other providers ignore it. |
 | `api_key_env` | The environment variable that holds the API key. Defaults to `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`. |
 | `max_fix_attempts` | How many commands may fail in a row before prompter stops. See [Self-repair](#self-repair). |
 | `auto_approve_safe` | Set to `false` to confirm every command, including safe ones. |
 | `preferences` | Free-form lines passed straight to the model, such as `"Use pnpm, not npm."` |
 
-Run `prompter --config` to print the path. Any key can be overridden for a
-single run with a flag (see [Flags](#flags)).
+Run `prompter config` to print the path, or `prompter status` to see the
+current provider, model, workspace, and which providers have a key. Any value
+can be overridden for a single run with a flag (see [Flags](#flags)).
 
 ## Providers
 
 The model backend sits behind one small interface, so prompter behaves the same
-whichever you pick. Switch with `provider` in config, or `--provider` for one
-run. Provider names are case-insensitive, and `claude`, `gpt`, and `google` work
-as aliases.
+whichever you pick. Set your default with `prompter use <provider> [model]`, or
+override it for one run with `--provider`. Provider names are case-insensitive,
+and `claude`, `gpt`, and `google` work as aliases.
 
 | Provider | Default model | API key | Notes |
 |----------|---------------|---------|-------|
@@ -122,13 +98,8 @@ as aliases.
 
 A note on billing. An Anthropic Pro or Max subscription and an API key are
 separate accounts. A program cannot bill against your web subscription. For a
-free tier, use Gemini, or Groq/OpenRouter through the OpenAI adapter. Switch to
-Anthropic when you want it.
-
-> Model IDs and SDK shapes were checked against the providers' June 2026 docs.
-> The Gemini adapter sends function results with role `tool`, matching the
-> current google-genai API. Run one live test per provider before relying on it;
-> OpenAI and Gemini were not run here.
+free tier, use Gemini, or Groq and OpenRouter through the OpenAI adapter. Switch
+to Anthropic when you want it.
 
 ## API keys
 
@@ -137,24 +108,31 @@ order:
 
 1. The environment variable for the provider (`ANTHROPIC_API_KEY`,
    `OPENAI_API_KEY`, or `GEMINI_API_KEY`).
-2. A key you stored with `prompter keys`, in `~/.prompter/keys.json`.
+2. A key you stored with `prompter keys add`, in `~/.prompter/keys.json`.
 
 The environment variable always wins, so CI and one-off overrides keep working.
 
-If no key is found when you run a command, prompter asks you to paste one and
-saves it for next time. Press Enter without typing to exit instead.
+No command ever prompts you. If a key is missing when you run, prompter prints
+the exact command to fix it and exits, rather than dropping into a hidden prompt:
 
-Store a key ahead of time and forget about env vars:
-
-```bash
-prompter keys set anthropic     # prompts for the key, input hidden
-prompter keys list              # shows which providers have a key (masked)
-prompter keys clear anthropic   # removes a stored key
+```text
+✗ No API key for gemini
+    add it:     prompter keys add gemini <key>
+    or export:  GEMINI_API_KEY=<key>
 ```
 
-Stored keys live in `~/.prompter/keys.json` with file mode 0600 (readable only
-by you). It is plain text, the same approach as `~/.aws/credentials`. If you
-prefer not to store keys on disk, use the environment variable instead.
+Manage stored keys by command:
+
+```bash
+prompter keys add anthropic sk-ant-...
+prompter keys list
+prompter keys remove anthropic
+```
+
+Because the key is an argument, it lands in your shell history. To avoid that,
+export the environment variable instead. Stored keys live in
+`~/.prompter/keys.json` with file mode 0600, readable only by you. It is plain
+text, the same approach as `~/.aws/credentials`.
 
 ## Risk tiers and confirmation
 
@@ -185,7 +163,7 @@ repair rules.
 
 `max_fix_attempts` (default 3) stops it from looping on a stuck step. It counts
 commands that fail in a row. At the limit, prompter tells the model to stop and
-explain what went wrong. A command you decline does not count; only commands
+explain what went wrong. A command you decline does not count. Only commands
 that ran and failed do.
 
 ## How it works
@@ -199,7 +177,7 @@ that ran and failed do.
 4. The working directory persists across commands, so "make a folder, cd in,
    then run claude" lands in the right place.
 
-prompter cannot change the directory of the shell you launched it from; no
+prompter cannot change the directory of the shell you launched it from. No
 program can. It runs every command, and launches your coding agent, in the right
 place, which covers these workflows.
 
@@ -207,7 +185,26 @@ Programs that take over the terminal (`claude`, `vim`, `ssh`, a REPL, `top`) get
 the real terminal so you can interact with them. The model marks these
 automatically.
 
+## Commands
+
+Management is done with subcommands. Flags only modify a single run. No command
+opens a prompt.
+
+| Command | Effect |
+|---------|--------|
+| `prompter "<goal>"` | Run a one-off goal. |
+| `prompter` | Interactive chat (REPL). |
+| `prompter keys add <provider> <key>` | Store an API key. |
+| `prompter keys list` | Show which providers have a key (masked). |
+| `prompter keys remove <provider>` | Delete a stored key. |
+| `prompter use <provider> [model]` | Set your default provider and model. |
+| `prompter status` | Show the current provider, model, workspace, and keys. |
+| `prompter config` | Print the config file path. |
+| `prompter help` | Show usage. |
+
 ## Flags
+
+Flags modify a single run and sit alongside the goal (`prompter --yolo "..."`).
 
 | Flag | Effect |
 |------|--------|
@@ -218,12 +215,12 @@ automatically.
 | `--max-fix N` | Override `max_fix_attempts`. |
 | `--ask-all` | Confirm every command, including safe ones. |
 | `--yolo` | Run everything with no confirmation. Dangerous. |
-| `--config` | Print the config file path and exit. |
 
 ## Project layout
 
 ```
 prompter/
+  constants.py   shared primitive constants (empty string, separators)
   colors.py      Palette (ANSI, off when output is not a TTY)
   config.py      Config dataclass, ApprovalMode, load and save
   risk.py        RiskTier and classify(): the safe/confirm/danger rules
@@ -234,7 +231,7 @@ prompter/
     anthropic_provider.py, openai_provider.py, gemini_provider.py
   ui.py          Console and Decision: all printing and input
   agent.py       Agent and Conversation: the orchestration loop
-  cli.py         argument parsing, wiring, main()
+  cli.py         command dispatch, run setup, actionable errors, main()
 tests/
   conftest.py, _helpers.py   fixtures and fakes (FakeProvider, FakeShell)
   test_*.py                  one module per package module
@@ -259,7 +256,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-About 114 unit tests, no network or API key needed. The agent loop is tested
+About 165 unit tests, no network or API key needed. The agent loop is tested
 with fakes: a scripted provider, a recording shell, a mock console. Each
 adapter's translation to and from its wire format is tested with a fake SDK
 client.

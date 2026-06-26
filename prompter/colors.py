@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import sys
 
+from .constants import EMPTY
+
 ENV_NO_COLOR = "NO_COLOR"
 
 _RESET = "\033[0m"
@@ -29,7 +31,7 @@ class Palette:
         active = supports_color() if enabled is None else enabled
 
         def pick(code: str) -> str:
-            return code if active else ""
+            return code if active else EMPTY
 
         self.RESET = pick(_RESET)
         self.BOLD = pick(_BOLD)

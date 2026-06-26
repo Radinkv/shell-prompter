@@ -2,8 +2,8 @@
 
 Supplies the two provider-specific steps of the template method: render neutral
 history into the Messages API shape, and stream a turn with the run_command tool
-and adaptive thinking. The Anthropic wire vocabulary lives here — no other
-module needs it.
+and adaptive thinking. The Anthropic wire vocabulary lives here. No other module
+needs it.
 """
 
 from __future__ import annotations
@@ -48,16 +48,24 @@ _BLOCK_TOOL_USE = "tool_use"
 _BLOCK_TOOL_RESULT = "tool_result"
 _EVENT_CONTENT_BLOCK_DELTA = "content_block_delta"
 _DELTA_TEXT = "text_delta"
-_THINKING_ADAPTIVE = {"type": "adaptive"}
-_TOOL_CHOICE_NONE = {"type": "none"}
+_THINKING_VALUE_ADAPTIVE = "adaptive"
+_TOOL_CHOICE_VALUE_NONE = "none"
+_THINKING_ADAPTIVE = {_FIELD_TYPE: _THINKING_VALUE_ADAPTIVE}
+_TOOL_CHOICE_NONE = {_FIELD_TYPE: _TOOL_CHOICE_VALUE_NONE}
 
 _TOOL_KEY_NAME = "name"
 _TOOL_KEY_DESCRIPTION = "description"
 _TOOL_KEY_INPUT_SCHEMA = "input_schema"
 
+_REQ_MODEL = "model"
+_REQ_MAX_TOKENS = "max_tokens"
+_REQ_SYSTEM = "system"
+_REQ_THINKING = "thinking"
+_REQ_TOOLS = "tools"
+_REQ_MESSAGES = "messages"
+_REQ_TOOL_CHOICE = "tool_choice"
+
 _CLIENT_INIT_ERROR = "Could not initialize the Anthropic client: {error}"
-# The SDK constructs lazily and raises a client-side TypeError at request time
-# when no key/token/profile can be resolved; treat that as an auth failure.
 _MISSING_AUTH_HINT = "authentication"
 
 _RUN_TOOL = {
@@ -119,18 +127,24 @@ class AnthropicProvider(ModelProvider):
 
     def build_request(self, history, system_texts, disable_tools) -> dict:
         request = {
-            "model": self.model,
-            "max_tokens": MAX_TOKENS,
-            "system": [{_FIELD_TYPE: _BLOCK_TEXT, _FIELD_TEXT: t} for t in system_texts],
-            "thinking": _THINKING_ADAPTIVE,
-            "tools": [_RUN_TOOL],
-            "messages": _to_messages(history),
+            _REQ_MODEL: self.model,
+            _REQ_MAX_TOKENS: MAX_TOKENS,
+            _REQ_SYSTEM: [{_FIELD_TYPE: _BLOCK_TEXT, _FIELD_TEXT: t} for t in system_texts],
+            _REQ_THINKING: _THINKING_ADAPTIVE,
+            _REQ_TOOLS: [_RUN_TOOL],
+            _REQ_MESSAGES: _to_messages(history),
         }
         if disable_tools:
-            request["tool_choice"] = _TOOL_CHOICE_NONE
+            request[_REQ_TOOL_CHOICE] = _TOOL_CHOICE_NONE
         return request
 
     def run_stream(self, request, collector: TurnCollector) -> None:
+        """Stream a turn into the collector.
+
+        The Anthropic client constructs lazily and raises a client-side
+        TypeError at request time when no key, token, or profile can be
+        resolved. That case is treated as an auth failure.
+        """
         try:
             with self._client.messages.stream(**request) as stream:
                 for event in stream:

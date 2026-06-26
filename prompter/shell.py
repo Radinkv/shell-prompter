@@ -14,6 +14,8 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 
+from .constants import EMPTY, NEWLINE
+
 COMMAND_TIMEOUT_SECONDS = 600
 TIMEOUT_EXIT_CODE = 124
 MAX_OUTPUT_CHARS = 20000
@@ -34,7 +36,7 @@ _INTERACTIVE_TEMPLATE = "cd {cwd} 2>/dev/null; {command}"
 _TIMEOUT_MESSAGE = (
     f"Command timed out after {COMMAND_TIMEOUT_SECONDS}s and was killed."
 )
-_INTERACTIVE_STDOUT = "(interactive program — output shown directly above)"
+_INTERACTIVE_STDOUT = "(interactive program, output shown directly above)"
 _OMITTED_TEMPLATE = "{head}\n... [{count} characters omitted] ...\n{tail}"
 
 _INTERACTIVE_COMMANDS = re.compile(
@@ -93,7 +95,7 @@ class Shell:
                 timeout=COMMAND_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
-            return CommandResult(TIMEOUT_EXIT_CODE, "", _TIMEOUT_MESSAGE, False)
+            return CommandResult(TIMEOUT_EXIT_CODE, EMPTY, _TIMEOUT_MESSAGE, False)
 
         stdout, changed = self._extract_cwd(proc.stdout)
         return CommandResult(
@@ -101,12 +103,12 @@ class Shell:
         )
 
     def _run_interactive(self, command: str) -> CommandResult:
-        """Hand the real terminal to the program; its cwd can't be recovered."""
+        """Hand the real terminal to the program. Its cwd cannot be recovered."""
         script = _INTERACTIVE_TEMPLATE.format(
             cwd=shlex.quote(self.cwd), command=command
         )
         proc = subprocess.run([BASH, BASH_COMMAND_FLAG, script])
-        return CommandResult(proc.returncode, _INTERACTIVE_STDOUT, "", False)
+        return CommandResult(proc.returncode, _INTERACTIVE_STDOUT, EMPTY, False)
 
     def _extract_cwd(self, stdout: str) -> tuple[str, bool]:
         changed = False
@@ -119,5 +121,5 @@ class Shell:
                     changed = True
             else:
                 kept.append(line)
-        trailing = "\n" if stdout.endswith("\n") and kept else ""
-        return "\n".join(kept) + trailing, changed
+        trailing = NEWLINE if stdout.endswith(NEWLINE) and kept else EMPTY
+        return NEWLINE.join(kept) + trailing, changed

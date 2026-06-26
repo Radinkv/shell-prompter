@@ -1,7 +1,7 @@
 """The agent loop: drive the model's tool calls, gate them by risk, run them,
 and keep the conversation and consecutive-failure state.
 
-The loop is provider-neutral — it speaks only the types in providers.base and
+The loop is provider-neutral. It speaks only the types in providers.base and
 calls one method, provider.complete(). Swapping Anthropic for OpenAI or Gemini
 changes nothing here.
 """
@@ -53,7 +53,7 @@ class CommandRequest:
     interactive: bool
 
     @classmethod
-    def from_invocation(cls, invocation: ToolInvocation) -> "CommandRequest":
+    def from_invocation(cls, invocation: ToolInvocation) -> CommandRequest:
         return cls(
             command=invocation.command,
             explanation=invocation.explanation,
@@ -65,8 +65,8 @@ class CommandRequest:
 class ToolOutcome:
     """Result of running one tool call.
 
-    is_failure is True only when a command actually ran and exited non-zero —
-    a user decline is an error to report but not a failed fix attempt.
+    is_failure is True only when a command actually ran and exited non-zero.
+    A user decline is an error to report but not a failed fix attempt.
     """
 
     text: str
@@ -112,7 +112,7 @@ class Agent:
             another_round = self._run_round()
 
     def _run_round(self) -> bool:
-        """Run one model turn; return whether another round is needed."""
+        """Run one model turn and return whether another round is needed."""
         turn = self._complete()
         self.conversation.add_assistant(turn)
         if not turn.tool_calls:

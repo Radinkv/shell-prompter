@@ -2,7 +2,7 @@
 
 The tier decides whether prompter runs a command automatically or asks first.
 RISK_REGISTRY lists the tiers in precedence order so the loop in classify() is
-trivial and the precedence lives in data, not control flow; the first matching
+trivial and the precedence lives in data, not control flow. The first matching
 rule wins (danger before confirm).
 """
 

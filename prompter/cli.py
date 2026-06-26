@@ -1,9 +1,14 @@
-"""Command-line entry point: argument parsing, wiring, and dispatch."""
+"""Command-line entry point: a command dispatcher with actionable errors.
+
+Management is done with subcommands (keys, use, status, config). Flags only
+modify a single run. No command ever opens an interactive prompt. Every failure
+prints a problem with the exact command to fix it.
+"""
 
 from __future__ import annotations
 
 import argparse
-import getpass
+import difflib
 import os
 import sys
 
@@ -13,12 +18,15 @@ from .config import (
     CONFIG_PATH,
     Config,
     PROGRAM_NAME,
+    PROVIDER_ALIASES,
     PROVIDER_OPENAI,
     default_api_key_env,
     default_model_for,
     load_config,
     normalize_provider,
+    save_config,
 )
+from .constants import COMMA_SPACE, EMPTY, SPACE
 from .keys import KEYS_PATH, clear_key, set_key, stored_key
 from .providers import (
     ModelProvider,
@@ -26,7 +34,6 @@ from .providers import (
     ProviderError,
     create_provider,
     known_providers,
-    unknown_provider_message,
 )
 from .shell import Shell
 from .ui import Console
@@ -35,74 +42,221 @@ OK_EXIT_CODE = 0
 ERROR_EXIT_CODE = 1
 SIGINT_EXIT_CODE = 130
 
-_DESCRIPTION = "Describe what you want; prompter runs the shell commands."
-_EPILOG = "Manage API keys with:  prompter keys [list | set <provider> | clear <provider>]"
-_EXIT_WORDS = {"exit", "quit", ":q"}
-_MODEL_IS_PROVIDER = (
-    "'{value}' is a provider, not a model. Use `prompter --provider {provider}`. "
-    "The --model flag takes a model id like '{example}'."
-)
-_BAD_MAX_FIX = "--max-fix must be at least 1 (got {value})."
-_BASE_URL_IGNORED = (
-    "Note: base_url only applies to the openai provider; ignoring it for {provider}."
-)
-_NO_KEY_INTRO = "No API key found for {provider}."
-_AUTH_FAILED_INTRO = "Authentication failed for {provider}."
-_KEY_INPUT_OR_EXIT = "Paste your {provider} API key, or press Enter to exit: "
-_NO_KEY_EXIT = (
-    "No key provided, exiting. Set one later with `prompter keys set {provider}` "
-    "or export {env}."
-)
+_CMD_KEYS = "keys"
+_CMD_USE = "use"
+_CMD_STATUS = "status"
+_CMD_CONFIG = "config"
+_CMD_RUN = "run"
+_CMD_HELP = "help"
+_HELP_FLAGS = ("-h", "--help")
 
-_KEYS_COMMAND = "keys"
-_KEYS_USAGE = "Usage: prompter keys [list | set <provider> | clear <provider> | path]"
 _KEYS_LIST = "list"
-_KEYS_SET = "set"
-_KEYS_CLEAR = ("clear", "remove", "rm")
-_KEYS_PATH = "path"
+_KEYS_ADD = "add"
+_KEYS_REMOVE = ("remove", "rm", "clear")
 
-_KEYS_LIST_ROW = "  {provider:10} {source}"
-_KEY_SOURCE_ENV = "environment ({env})"
-_KEY_SOURCE_STORED = "stored ({masked})"
-_KEY_SOURCE_NOT_SET = "not set"
+_EXIT_WORDS = {"exit", "quit", ":q"}
+
+_ARG_PROMPT = "prompt"
+_ARG_NARGS_ANY = "*"
+_FLAG_PROVIDER = "--provider"
+_FLAG_MODEL = "--model"
+_FLAG_BASE_URL = "--base-url"
+_FLAG_WORKSPACE = "--workspace"
+_FLAG_MAX_FIX = "--max-fix"
+_FLAG_ASK_ALL = "--ask-all"
+_FLAG_YOLO = "--yolo"
+_ACTION_STORE_TRUE = "store_true"
+
+_LABEL_ADD_IT = "add it"
+_LABEL_OR_EXPORT = "or export"
+_LABEL_DID_YOU_MEAN = "did you mean"
+_LABEL_AVAILABLE = "available"
+_LABEL_SWITCH_TO_IT = "switch to it"
+_LABEL_FOR_ONE_RUN = "for one run"
+_LABEL_SET_A_MODEL = "set a model"
+_LABEL_USAGE = "usage"
+_LABEL_EXAMPLE = "example"
+
+_FIELD_PROVIDER = "provider"
+_FIELD_MODEL = "model"
+_FIELD_WORKSPACE = "workspace"
+_FIELD_MAX_FIX = "max-fix"
+_FIELD_CONFIG = "config"
+
+_BASE_URL_IGNORED = (
+    "Note: base_url only applies to the openai provider. Ignoring it for {provider}."
+)
+
+_TITLE_NO_KEY = "No API key for {provider}"
+_CMD_ADD_KEY = "prompter keys add {provider} <key>"
+_ENV_EXPORT = "{env}=<key>"
+
+_TITLE_UNKNOWN_PROVIDER = 'Unknown provider "{name}"'
+_HINT_USE = "prompter use {provider}"
+
+_TITLE_MODEL_IS_PROVIDER = '"{value}" is a provider, not a model'
+_CMD_RUN_PROVIDER = 'prompter --provider {provider} "..."'
+
+_TITLE_BAD_MAX_FIX = "--max-fix must be at least 1 (got {value})"
+
+_MODEL_WORD = "model"
+_TITLE_NO_MODEL = '{provider} has no model "{model}"'
+_CMD_USE_MODEL = "prompter use {provider} <model>"
+_TITLE_PROVIDER_FAILED = "{provider} request failed"
+_MODEL_ERROR_MARKERS = (
+    "not found", "does not exist", "is not supported", "no model",
+    "invalid model", "not a valid model",
+)
+
+_TITLE_UNKNOWN_KEYS_ACTION = 'Unknown "keys" command: "{action}"'
+_USAGE_KEYS = "prompter keys [list | add <provider> <key> | remove <provider>]"
+_TITLE_KEYS_ADD_USAGE = "Usage: prompter keys add <provider> <key>"
+_EXAMPLE_KEYS_ADD = "prompter keys add gemini AIza..."
+_TITLE_KEYS_REMOVE_USAGE = "Usage: prompter keys remove <provider>"
+_KEY_SAVED = "Saved the {provider} key to {path}"
+_KEY_REMOVED = "Removed the stored {provider} key"
+_NO_STORED_KEY = "No stored key for {provider}"
+
+_SOURCE_ENV = "set via {env}"
+_SOURCE_STORED = "stored ({masked})"
+_SOURCE_NOT_SET = "not set"
 _MASK_TEMPLATE = "...{tail}"
 _MASK_FALLBACK = "set"
-_PROVIDER_PROMPT = "Provider ({choices}): "
-_KEY_INPUT_PROMPT = "Paste the {provider} API key (input hidden): "
-_NO_KEY_ENTERED = "No key entered; nothing saved."
-_KEY_SAVED = "Saved the {provider} key to {path} (readable only by you)."
-_CLEAR_USAGE = "Usage: prompter keys clear <provider>"
-_KEY_REMOVED = "Removed the stored {provider} key."
-_NO_STORED_KEY = "No stored key for {provider}."
+_MASK_TAIL_LENGTH = 4
 
-_HELP_PROMPT = "What you want done."
-_HELP_PROVIDER = "Model provider this run (anthropic, openai, gemini)."
-_HELP_MODEL = "Model override (config 'model', else the provider default)."
-_HELP_BASE_URL = "OpenAI-compatible base URL (e.g. Groq, OpenRouter)."
-_HELP_WORKSPACE = "Override the default project workspace this run."
-_HELP_MAX_FIX = "Max commands that may fail in a row before stopping."
-_HELP_ASK_ALL = "Confirm every command, even safe ones."
-_HELP_YOLO = "Run everything without confirmation (dangerous)."
-_HELP_CONFIG = "Print the config file path and exit."
+_TITLE_USE_USAGE = "Usage: prompter use <provider> [model]"
+_EXAMPLE_USE = "prompter use gemini"
+_DEFAULT_SET = "Default provider set to {provider} (model: {model})"
+
+_KEYS_HEADER = "keys:"
+
+_HELP_TEXT = """\
+prompter is a natural-language shell agent.
+
+Run:
+  prompter "<goal>"                 run a one-off goal
+  prompter                          interactive chat (REPL)
+
+Run flags (modify one run):
+  --provider NAME                   anthropic, openai, or gemini
+  --model ID                        model override
+  --base-url URL                    OpenAI-compatible endpoint (Groq, OpenRouter)
+  --workspace PATH                  where new projects go
+  --max-fix N                       failures in a row before stopping
+  --ask-all                         confirm every command
+  --yolo                            run everything with no confirmation
+
+Manage:
+  prompter keys add <provider> <key>    store an API key
+  prompter keys list                    show key status
+  prompter keys remove <provider>       delete a stored key
+  prompter use <provider> [model]       set your default provider/model
+  prompter status                       show the current setup
+  prompter config                       print the config file path
+  prompter help                         show this help
+
+Providers: anthropic, openai, gemini
+"""
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog=PROGRAM_NAME, description=_DESCRIPTION, epilog=_EPILOG)
-    parser.add_argument("prompt", nargs="*", help=_HELP_PROMPT)
-    parser.add_argument("--provider", help=_HELP_PROVIDER)
-    parser.add_argument("--model", default=None, help=_HELP_MODEL)
-    parser.add_argument("--base-url", help=_HELP_BASE_URL)
-    parser.add_argument("--workspace", help=_HELP_WORKSPACE)
-    parser.add_argument("--max-fix", type=int, default=None, help=_HELP_MAX_FIX)
-    parser.add_argument("--ask-all", action="store_true", help=_HELP_ASK_ALL)
-    parser.add_argument("--yolo", action="store_true", help=_HELP_YOLO)
-    parser.add_argument("--config", action="store_true", help=_HELP_CONFIG)
+def _missing_key_problem(config: Config):
+    return (
+        _TITLE_NO_KEY.format(provider=config.provider),
+        [(_LABEL_ADD_IT, _CMD_ADD_KEY.format(provider=config.provider)),
+         (_LABEL_OR_EXPORT, _ENV_EXPORT.format(env=config.key_env))],
+        None,
+    )
+
+
+def _unknown_provider_problem(name: str):
+    """Build the unknown-provider problem, matching aliases for a suggestion.
+
+    Candidates include the aliases (claude, gpt, google) so a near miss like
+    "claud" suggests anthropic, normalized back to its canonical name.
+    """
+    known = known_providers()
+    hints = []
+    candidates = list(known) + list(PROVIDER_ALIASES)
+    match = difflib.get_close_matches(name.lower(), candidates, n=1)
+    if match:
+        hints.append((_LABEL_DID_YOU_MEAN,
+                      _HINT_USE.format(provider=normalize_provider(match[0]))))
+    hints.append((_LABEL_AVAILABLE, COMMA_SPACE.join(known)))
+    return (_TITLE_UNKNOWN_PROVIDER.format(name=name), hints, None)
+
+
+def _model_is_provider_problem(value: str, provider: str):
+    return (
+        _TITLE_MODEL_IS_PROVIDER.format(value=value),
+        [(_LABEL_SWITCH_TO_IT, _HINT_USE.format(provider=provider)),
+         (_LABEL_FOR_ONE_RUN, _CMD_RUN_PROVIDER.format(provider=provider))],
+        None,
+    )
+
+
+def _looks_like_model_error(message: str) -> bool:
+    low = message.lower()
+    return _MODEL_WORD in low and any(m in low for m in _MODEL_ERROR_MARKERS)
+
+
+def _provider_request_problem(config: Config, exc: ProviderError):
+    detail = str(exc)
+    if _looks_like_model_error(detail):
+        return (
+            _TITLE_NO_MODEL.format(provider=config.provider, model=config.resolved_model),
+            [(_LABEL_SET_A_MODEL, _CMD_USE_MODEL.format(provider=config.provider))],
+            None,
+        )
+    return (_TITLE_PROVIDER_FAILED.format(provider=config.provider), [], detail)
+
+
+class _CommandError(Exception):
+    def __init__(self, title, hints=(), detail=None):
+        super().__init__(title)
+        self.title = title
+        self.hints = hints
+        self.detail = detail
+
+
+def _fail(console: Console, title, hints=(), detail=None) -> int:
+    console.problem(title, hints, detail)
+    return ERROR_EXIT_CODE
+
+
+def _mask(key: str) -> str:
+    if len(key) >= _MASK_TAIL_LENGTH:
+        return _MASK_TEMPLATE.format(tail=key[-_MASK_TAIL_LENGTH:])
+    return _MASK_FALLBACK
+
+
+def _run_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=PROGRAM_NAME, add_help=False)
+    parser.add_argument(_ARG_PROMPT, nargs=_ARG_NARGS_ANY)
+    parser.add_argument(_FLAG_PROVIDER)
+    parser.add_argument(_FLAG_MODEL, default=None)
+    parser.add_argument(_FLAG_BASE_URL)
+    parser.add_argument(_FLAG_WORKSPACE)
+    parser.add_argument(_FLAG_MAX_FIX, type=int, default=None)
+    parser.add_argument(_FLAG_ASK_ALL, action=_ACTION_STORE_TRUE)
+    parser.add_argument(_FLAG_YOLO, action=_ACTION_STORE_TRUE)
     return parser
 
 
+def _reject_provider_as_model(args) -> None:
+    if not args.model:
+        return
+    provider = normalize_provider(args.model)
+    if provider in known_providers():
+        raise _CommandError(*_model_is_provider_problem(args.model, provider))
+
+
 def _apply_overrides(args, config: Config) -> None:
-    """CLI flags override config values for this run; resolve the model."""
+    """Apply CLI flag overrides for this run, then resolve the model.
+
+    A model pinned in the config belongs to the provider it was set for.
+    Switching providers falls back to the new provider's default model.
+    """
+    config_provider = normalize_provider(config.provider)
     if args.provider:
         config.provider = args.provider
     config.provider = normalize_provider(config.provider)
@@ -112,7 +266,8 @@ def _apply_overrides(args, config: Config) -> None:
         config.default_workspace = args.workspace
     if args.max_fix is not None:
         config.max_fix_attempts = args.max_fix
-    config.model = args.model or config.model or default_model_for(config.provider)
+    pinned = config.model if config_provider == config.provider else EMPTY
+    config.model = args.model or pinned or default_model_for(config.provider)
 
 
 def _resolve_mode(args, config: Config) -> ApprovalMode:
@@ -123,87 +278,30 @@ def _resolve_mode(args, config: Config) -> ApprovalMode:
     return ApprovalMode.SMART
 
 
-def _reject_provider_as_model(args) -> None:
-    """`--model gemini` is almost always a mix-up for `--provider gemini`."""
-    if not args.model:
-        return
-    provider = normalize_provider(args.model)
-    if provider in known_providers():
-        sys.exit(_MODEL_IS_PROVIDER.format(
-            value=args.model, provider=provider, example=default_model_for(provider)))
-
-
 def _validate_config(config: Config, console: Console) -> None:
     if config.max_fix_attempts < 1:
-        sys.exit(_BAD_MAX_FIX.format(value=config.max_fix_attempts))
+        raise _CommandError(_TITLE_BAD_MAX_FIX.format(value=config.max_fix_attempts))
     if config.base_url and config.provider != PROVIDER_OPENAI:
         console.note(_BASE_URL_IGNORED.format(provider=config.provider))
 
 
-def _prompt_for_key(config: Config) -> str:
-    try:
-        return getpass.getpass(
-            _KEY_INPUT_OR_EXIT.format(provider=config.provider)).strip()
-    except (EOFError, KeyboardInterrupt):
-        return ""
-
-
-def _prompt_and_store_key(config: Config, intro: str) -> bool:
-    """Ask for a key (after printing intro), store it, return whether we got one."""
-    print(intro.format(provider=config.provider), file=sys.stderr)
-    key = _prompt_for_key(config)
-    if not key:
-        return False
-    set_key(config.provider, key)
-    print(_KEY_SAVED.format(provider=config.provider, path=KEYS_PATH))
-    return True
-
-
-def _create_provider_or_prompt(config: Config) -> ModelProvider:
+def _create_provider_checked(config: Config) -> ModelProvider:
     if config.provider not in known_providers():
-        sys.exit(unknown_provider_message(config.provider))
+        raise _CommandError(*_unknown_provider_problem(config.provider))
     try:
         return create_provider(config)
     except ProviderError:
-        pass
-    if not _prompt_and_store_key(config, _NO_KEY_INTRO):
-        sys.exit(_NO_KEY_EXIT.format(provider=config.provider, env=config.key_env))
-    try:
-        return create_provider(config)
-    except ProviderError as e:
-        sys.exit(str(e))
+        raise _CommandError(*_missing_key_problem(config))
 
 
-def make_agent(args, config: Config, console: Console) -> Agent:
+def _prepare(args, console: Console):
+    config = load_config()
     _reject_provider_as_model(args)
     _apply_overrides(args, config)
     _validate_config(config, console)
+    provider = _create_provider_checked(config)
     mode = _resolve_mode(args, config)
-    provider = _create_provider_or_prompt(config)
-    return Agent(provider, Shell(), console, config, mode)
-
-
-def _handle_interrupt(console: Console, _exc: BaseException) -> int:
-    console.stopped()
-    return SIGINT_EXIT_CODE
-
-
-def _handle_auth(console: Console, _exc: BaseException) -> int:
-    console.auth_error()
-    return ERROR_EXIT_CODE
-
-
-def _handle_api(console: Console, exc: BaseException) -> int:
-    console.api_error(exc)
-    return ERROR_EXIT_CODE
-
-
-# ProviderAuthError is handled directly in run() (prompt for a key + retry once),
-# so it is not in this registry.
-_ERROR_HANDLERS = [
-    ((KeyboardInterrupt, QuitRequested), _handle_interrupt),
-    (ProviderError, _handle_api),
-]
+    return Agent(provider, Shell(), console, config, mode), config, mode
 
 
 def _dispatch(agent: Agent, goal: str) -> None:
@@ -211,47 +309,6 @@ def _dispatch(agent: Agent, goal: str) -> None:
         agent.run_turn(goal)
     else:
         _repl(agent, agent.console)
-
-
-def _attempt(args, config: Config, console: Console, show_banner: bool) -> int:
-    agent = make_agent(args, config, console)
-    if show_banner:
-        console.banner(config, agent.mode)
-    goal = " ".join(args.prompt).strip()
-    _dispatch(agent, goal)
-    return OK_EXIT_CODE
-
-
-def _dispatch_error(console: Console, exc: BaseException) -> int:
-    for exc_types, handler in _ERROR_HANDLERS:
-        if isinstance(exc, exc_types):
-            return handler(console, exc)
-    raise exc
-
-
-def _auth_failure_exit(config: Config, console: Console,
-                       exc: BaseException, attempt: int) -> int:
-    if attempt == 0:
-        # The user declined the prompt rather than entering a key.
-        print(_NO_KEY_EXIT.format(provider=config.provider, env=config.key_env),
-              file=sys.stderr)
-        return ERROR_EXIT_CODE
-    # A key was entered on the first attempt but the provider still rejected it.
-    return _handle_auth(console, exc)
-
-
-def run(args, console: Console) -> int:
-    config = load_config()
-    for attempt in range(2):
-        try:
-            return _attempt(args, config, console, show_banner=(attempt == 0))
-        except ProviderAuthError as exc:
-            if attempt == 0 and _prompt_and_store_key(config, _AUTH_FAILED_INTRO):
-                continue
-            return _auth_failure_exit(config, console, exc, attempt)
-        except (KeyboardInterrupt, Exception) as exc:
-            return _dispatch_error(console, exc)
-    return ERROR_EXIT_CODE
 
 
 def _repl(agent: Agent, console: Console) -> None:
@@ -269,77 +326,133 @@ def _repl(agent: Agent, console: Console) -> None:
         agent.run_turn(line)
 
 
-def _mask(key: str) -> str:
-    return _MASK_TEMPLATE.format(tail=key[-4:]) if len(key) >= 4 else _MASK_FALLBACK
+def _run_agent(agent: Agent, config: Config, console: Console, goal: str) -> int:
+    try:
+        _dispatch(agent, goal)
+    except (KeyboardInterrupt, QuitRequested):
+        console.stopped()
+        return SIGINT_EXIT_CODE
+    except ProviderAuthError:
+        return _fail(console, *_missing_key_problem(config))
+    except ProviderError as exc:
+        return _fail(console, *_provider_request_problem(config, exc))
+    return OK_EXIT_CODE
 
 
-def _keys_list() -> int:
+def cmd_run(argv: list[str], console: Console) -> int:
+    args = _run_parser().parse_args(argv)
+    try:
+        agent, config, mode = _prepare(args, console)
+    except _CommandError as e:
+        return _fail(console, e.title, e.hints, e.detail)
+    console.banner(config, mode)
+    return _run_agent(agent, config, console, SPACE.join(args.prompt).strip())
+
+
+def _keys_list(console: Console) -> int:
     for provider in known_providers():
-        env_name = default_api_key_env(provider)
+        env = default_api_key_env(provider)
         stored = stored_key(provider)
-        if env_name and os.environ.get(env_name):
-            source = _KEY_SOURCE_ENV.format(env=env_name)
+        if env and os.environ.get(env):
+            console.key_status(provider, _SOURCE_ENV.format(env=env), True)
         elif stored:
-            source = _KEY_SOURCE_STORED.format(masked=_mask(stored))
+            console.key_status(
+                provider, _SOURCE_STORED.format(masked=_mask(stored)), True)
         else:
-            source = _KEY_SOURCE_NOT_SET
-        print(_KEYS_LIST_ROW.format(provider=provider, source=source))
+            console.key_status(provider, _SOURCE_NOT_SET, False)
     return OK_EXIT_CODE
 
 
-def _keys_set(rest: list[str]) -> int:
-    providers = known_providers()
-    prompt = _PROVIDER_PROMPT.format(choices="/".join(providers))
-    provider = rest[0] if rest else input(prompt).strip()
-    if provider not in providers:
-        print(unknown_provider_message(provider), file=sys.stderr)
-        return ERROR_EXIT_CODE
-    key = getpass.getpass(_KEY_INPUT_PROMPT.format(provider=provider)).strip()
-    if not key:
-        print(_NO_KEY_ENTERED, file=sys.stderr)
-        return ERROR_EXIT_CODE
-    set_key(provider, key)
-    print(_KEY_SAVED.format(provider=provider, path=KEYS_PATH))
+def _keys_add(rest: list[str], console: Console) -> int:
+    if len(rest) < 2:
+        return _fail(console, _TITLE_KEYS_ADD_USAGE, [(_LABEL_EXAMPLE, _EXAMPLE_KEYS_ADD)])
+    provider = normalize_provider(rest[0])
+    if provider not in known_providers():
+        return _fail(console, *_unknown_provider_problem(rest[0]))
+    set_key(provider, rest[1])
+    console.success(_KEY_SAVED.format(provider=provider, path=KEYS_PATH))
     return OK_EXIT_CODE
 
 
-def _keys_clear(rest: list[str]) -> int:
+def _keys_remove(rest: list[str], console: Console) -> int:
     if not rest:
-        print(_CLEAR_USAGE, file=sys.stderr)
-        return ERROR_EXIT_CODE
-    provider = rest[0]
+        return _fail(console, _TITLE_KEYS_REMOVE_USAGE)
+    provider = normalize_provider(rest[0])
     if clear_key(provider):
-        print(_KEY_REMOVED.format(provider=provider))
+        console.success(_KEY_REMOVED.format(provider=provider))
     else:
-        print(_NO_STORED_KEY.format(provider=provider))
+        console.info(_NO_STORED_KEY.format(provider=provider))
     return OK_EXIT_CODE
 
 
-def keys_command(argv: list[str]) -> int:
+def cmd_keys(argv: list[str], console: Console) -> int:
     action = argv[0] if argv else _KEYS_LIST
     rest = argv[1:]
-    match action:
-        case _ if action == _KEYS_LIST:
-            return _keys_list()
-        case _ if action == _KEYS_SET:
-            return _keys_set(rest)
-        case _ if action in _KEYS_CLEAR:
-            return _keys_clear(rest)
-        case _ if action == _KEYS_PATH:
-            print(KEYS_PATH)
-            return OK_EXIT_CODE
-        case _:
-            print(_KEYS_USAGE, file=sys.stderr)
-            return ERROR_EXIT_CODE
+    if action == _KEYS_LIST:
+        return _keys_list(console)
+    if action == _KEYS_ADD:
+        return _keys_add(rest, console)
+    if action in _KEYS_REMOVE:
+        return _keys_remove(rest, console)
+    return _fail(console, _TITLE_UNKNOWN_KEYS_ACTION.format(action=action),
+                 [(_LABEL_USAGE, _USAGE_KEYS)])
+
+
+def cmd_use(argv: list[str], console: Console) -> int:
+    if not argv:
+        return _fail(console, _TITLE_USE_USAGE, [(_LABEL_EXAMPLE, _EXAMPLE_USE)])
+    provider = normalize_provider(argv[0])
+    if provider not in known_providers():
+        return _fail(console, *_unknown_provider_problem(argv[0]))
+    config = load_config()
+    config.provider = provider
+    config.model = argv[1] if len(argv) > 1 else EMPTY
+    save_config(config)
+    console.success(_DEFAULT_SET.format(provider=provider, model=config.resolved_model))
+    return OK_EXIT_CODE
+
+
+def cmd_status(argv: list[str], console: Console) -> int:
+    config = load_config()
+    console.field(_FIELD_PROVIDER, config.provider)
+    console.field(_FIELD_MODEL, config.resolved_model)
+    console.field(_FIELD_WORKSPACE, config.workspace_path)
+    console.field(_FIELD_MAX_FIX, str(config.max_fix_attempts))
+    console.field(_FIELD_CONFIG, CONFIG_PATH)
+    console.info(_KEYS_HEADER)
+    return _keys_list(console)
+
+
+def cmd_config(argv: list[str], console: Console) -> int:
+    load_config()
+    console.info(CONFIG_PATH)
+    return OK_EXIT_CODE
+
+
+def cmd_help(console: Console) -> int:
+    console.info(_HELP_TEXT)
+    return OK_EXIT_CODE
+
+
+_COMMANDS = {
+    _CMD_KEYS: cmd_keys,
+    _CMD_USE: cmd_use,
+    _CMD_STATUS: cmd_status,
+    _CMD_CONFIG: cmd_config,
+}
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] == _KEYS_COMMAND:
-        return keys_command(argv[1:])
-    args = build_parser().parse_args(argv)
-    if args.config:
-        load_config()
-        print(CONFIG_PATH)
-        return OK_EXIT_CODE
-    return run(args, Console())
+    console = Console()
+    if not argv:
+        return cmd_run(argv, console)
+    head = argv[0]
+    if head in _HELP_FLAGS or head == _CMD_HELP:
+        return cmd_help(console)
+    if head == _CMD_RUN:
+        return cmd_run(argv[1:], console)
+    handler = _COMMANDS.get(head)
+    if handler is not None:
+        return handler(argv[1:], console)
+    return cmd_run(argv, console)

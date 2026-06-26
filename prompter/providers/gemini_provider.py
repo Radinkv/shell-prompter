@@ -1,12 +1,12 @@
 """Google Gemini provider adapter (google-genai SDK).
 
-Supplies the template method's two steps: build_request renders neutral history
-into Gemini ``contents`` + a GenerateContentConfig; run_stream streams the
+Supplies the template method's two steps. build_request renders neutral history
+into Gemini ``contents`` and a GenerateContentConfig. run_stream streams the
 response, feeding text and function calls into the collector.
 
 Gemini matches tool calls by function name (and an optional id) rather than an
 opaque id like the other providers, so the round-trip uses the shared TOOL_NAME.
-This adapter is written against the documented google-genai surface; verify the
+This adapter is written against the documented google-genai surface. Verify the
 function-call round-trip with a live smoke test.
 """
 
@@ -48,6 +48,24 @@ _GEMINI_BOOLEAN = "BOOLEAN"
 _AUTH_STATUS_CODES = {401, 403}
 _AUTH_HINT = "api key"
 
+_ATTR_FUNCTION_CALLS = "function_calls"
+_ATTR_CANDIDATES = "candidates"
+_ATTR_CONTENT = "content"
+_ATTR_PARTS = "parts"
+_ATTR_FUNCTION_CALL = "function_call"
+_ATTR_CODE = "code"
+_ATTR_STATUS_CODE = "status_code"
+_ATTR_ID = "id"
+
+_REQ_CONTENTS = "contents"
+_REQ_CONFIG = "config"
+_CFG_SYSTEM_INSTRUCTION = "system_instruction"
+_CFG_TOOLS = "tools"
+
+_MODULE_GENAI = "google.genai"
+_MODULE_GENAI_TYPES = "google.genai.types"
+_MODULE_GENAI_ERRORS = "google.genai.errors"
+
 
 def _function_declaration(types):
     return types.FunctionDeclaration(
@@ -73,21 +91,21 @@ def _chunk_text(chunk) -> str | None:
 
 
 def _chunk_function_calls(chunk) -> list:
-    direct = getattr(chunk, "function_calls", None)
+    direct = getattr(chunk, _ATTR_FUNCTION_CALLS, None)
     if direct:
         return list(direct)
     calls = []
-    for candidate in getattr(chunk, "candidates", None) or []:
-        content = getattr(candidate, "content", None)
-        for part in getattr(content, "parts", None) or []:
-            call = getattr(part, "function_call", None)
+    for candidate in getattr(chunk, _ATTR_CANDIDATES, None) or []:
+        content = getattr(candidate, _ATTR_CONTENT, None)
+        for part in getattr(content, _ATTR_PARTS, None) or []:
+            call = getattr(part, _ATTR_FUNCTION_CALL, None)
             if call is not None:
                 calls.append(call)
     return calls
 
 
 def _is_auth_error(error) -> bool:
-    code = getattr(error, "code", None) or getattr(error, "status_code", None)
+    code = getattr(error, _ATTR_CODE, None) or getattr(error, _ATTR_STATUS_CODE, None)
     if code in _AUTH_STATUS_CODES:
         return True
     return _AUTH_HINT in str(error).lower()
@@ -105,27 +123,27 @@ class GeminiProvider(ModelProvider):
     def build_request(self, history, system_texts, disable_tools) -> dict:
         types = self._types
         config_kwargs = {
-            "system_instruction": SYSTEM_TEXT_SEPARATOR.join(system_texts)
+            _CFG_SYSTEM_INSTRUCTION: SYSTEM_TEXT_SEPARATOR.join(system_texts)
         }
         if not disable_tools:
             tool = types.Tool(function_declarations=[_function_declaration(types)])
-            config_kwargs["tools"] = [tool]
+            config_kwargs[_CFG_TOOLS] = [tool]
         return {
-            "contents": self._to_contents(history),
-            "config": types.GenerateContentConfig(**config_kwargs),
+            _REQ_CONTENTS: self._to_contents(history),
+            _REQ_CONFIG: types.GenerateContentConfig(**config_kwargs),
         }
 
     def run_stream(self, request, collector: TurnCollector) -> None:
         try:
             stream = self._client.models.generate_content_stream(
                 model=self.model,
-                contents=request["contents"],
-                config=request["config"],
+                contents=request[_REQ_CONTENTS],
+                config=request[_REQ_CONFIG],
             )
             for chunk in stream:
                 collector.add_text(_chunk_text(chunk))
                 for index, call in enumerate(_chunk_function_calls(chunk)):
-                    call_id = getattr(call, "id", None) or fallback_call_id(index)
+                    call_id = getattr(call, _ATTR_ID, None) or fallback_call_id(index)
                     collector.add_tool_call(call_id, dict(call.args or {}))
         except self._errors.APIError as e:
             if _is_auth_error(e):
@@ -176,9 +194,9 @@ class GeminiProvider(ModelProvider):
 
 @register(PROVIDER_GEMINI)
 def build(config: Config) -> GeminiProvider:
-    genai = import_optional("google.genai", None)
-    types = import_optional("google.genai.types", None)
-    errors = import_optional("google.genai.errors", None)
+    genai = import_optional(_MODULE_GENAI)
+    types = import_optional(_MODULE_GENAI_TYPES)
+    errors = import_optional(_MODULE_GENAI_ERRORS)
     api_key = resolve_api_key(config)
     try:
         client = genai.Client(api_key=api_key) if api_key else genai.Client()

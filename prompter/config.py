@@ -3,9 +3,9 @@ defaults, approval modes, and provider identifiers.
 
 So you can say ``prompter "make a project called hunchday and run claude"`` and
 it creates ``~/Code/hunchday`` instead of dumping it in the current directory.
-Switch backends by setting ``provider`` (and a ``model`` for it); leave ``model``
+Switch backends by setting ``provider`` (and a ``model`` for it). Leave ``model``
 empty to use that provider's default. ``base_url`` points the OpenAI adapter at
-a compatible endpoint (Groq, OpenRouter); ``api_key_env`` overrides which
+a compatible endpoint (Groq, OpenRouter). ``api_key_env`` overrides which
 environment variable holds the key.
 """
 
@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 
 from .colors import palette
+from .constants import EMPTY, FILE_WRITE_MODE, JSON_INDENT
 
 PROGRAM_NAME = "prompter"
 
@@ -45,8 +46,7 @@ DEFAULT_PREFERENCES = [
 ]
 
 CONFIG_PATH = os.path.expanduser("~/.prompter/config.json")
-_JSON_INDENT = 2
-_READ_FAILURE_WARNING = "Warning: couldn't read {path} ({error}); using defaults."
+_READ_FAILURE_WARNING = "Warning: couldn't read {path} ({error}). Using defaults."
 
 
 class ApprovalMode(Enum):
@@ -67,12 +67,12 @@ PROVIDER_ALIASES = {
 
 def normalize_provider(name: str) -> str:
     """Lowercase and de-alias a provider name (Gemini, claude, gpt, ...)."""
-    key = (name or "").strip().lower()
+    key = (name or EMPTY).strip().lower()
     return PROVIDER_ALIASES.get(key, key)
 
 
 def default_model_for(provider: str) -> str:
-    return DEFAULT_MODELS.get(provider, "")
+    return DEFAULT_MODELS.get(provider, EMPTY)
 
 
 def default_api_key_env(provider: str) -> str | None:
@@ -83,7 +83,7 @@ def default_api_key_env(provider: str) -> str | None:
 class Config:
     default_workspace: str = DEFAULT_WORKSPACE
     provider: str = DEFAULT_PROVIDER
-    model: str = ""
+    model: str = EMPTY
     base_url: str | None = None
     api_key_env: str | None = None
     max_fix_attempts: int = DEFAULT_MAX_FIX_ATTEMPTS
@@ -108,7 +108,7 @@ class Config:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Config":
+    def from_dict(cls, data: dict) -> Config:
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in known})
 
@@ -126,9 +126,13 @@ def load_config() -> Config:
         return Config()
 
 
-def _write_default_config() -> Config:
+def save_config(config: Config) -> None:
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    with open(CONFIG_PATH, FILE_WRITE_MODE) as f:
+        json.dump(config.to_dict(), f, indent=JSON_INDENT)
+
+
+def _write_default_config() -> Config:
     config = Config()
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(config.to_dict(), f, indent=_JSON_INDENT)
+    save_config(config)
     return config
