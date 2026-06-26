@@ -17,6 +17,7 @@ the tools it knows how to launch.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import shlex
@@ -34,6 +35,45 @@ except ImportError:  # pragma: no cover - import guard
     )
 
 MODEL = "claude-opus-4-8"
+
+# ----------------------------------------------------------------------------
+# Config  (~/.prompter/config.json)
+# ----------------------------------------------------------------------------
+#
+# So you can say `prompter "make a project called hunchday and run claude"` and
+# it knows to create ~/Code/hunchday instead of dumping it in your current dir.
+# Edit the file directly to change defaults or add preferences; unknown keys are
+# preserved and ignored, and `preferences` is free-form guidance handed to the
+# model verbatim (e.g. "compile C++ with clang++ -std=c++20").
+
+CONFIG_PATH = os.path.expanduser("~/.prompter/config.json")
+
+DEFAULT_CONFIG = {
+    "default_workspace": "~/Code",
+    "max_fix_attempts": 3,
+    "auto_approve_safe": True,
+    "preferences": [
+        "When compiling C++, prefer clang++ with -std=c++17, "
+        "and fall back to g++ if clang++ isn't available.",
+    ],
+}
+
+
+def load_config() -> dict:
+    """Load config, writing defaults on first run. Tolerant of a bad file."""
+    try:
+        if not os.path.exists(CONFIG_PATH):
+            os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+            with open(CONFIG_PATH, "w") as f:
+                json.dump(DEFAULT_CONFIG, f, indent=2)
+            return dict(DEFAULT_CONFIG)
+        with open(CONFIG_PATH) as f:
+            return {**DEFAULT_CONFIG, **json.load(f)}
+    except (OSError, ValueError) as e:
+        print(f"{C.YELLOW}Warning: couldn't read {CONFIG_PATH} ({e}); "
+              f"using defaults.{C.RESET}", file=sys.stderr)
+        return dict(DEFAULT_CONFIG)
+
 
 # ----------------------------------------------------------------------------
 # Terminal colors
@@ -272,6 +312,14 @@ move around; you do not need to chain everything with && in one command.
 - For programs that need an interactive terminal (claude, vim/nvim, ssh, a \
 language REPL, top/htop, fzf), pass interactive=true. You will not see their \
 output; assume the user is interacting with them directly.
+- When the user asks to create a project or folder and doesn't say where, put \
+it under the default workspace shown in the environment block (create the \
+workspace with `mkdir -p` first if needed) — not the current directory.
+- Follow the user preferences in the environment block (e.g. preferred compiler \
+or language standard) when they apply.
+- If a command fails, read the actual error and try a sensible different fix; \
+do not re-run the identical failing command. If the same step keeps failing \
+after a few attempts, stop and explain what's wrong rather than looping forever.
 - Be careful with destructive or privileged actions. The user's harness gates \
 risky commands behind a confirmation prompt, so don't be surprised if a command \
 comes back as "declined by user" — adapt and propose an alternative or ask.
@@ -321,13 +369,17 @@ def confirm(command: str, tier: str, reason: str, explanation: str) -> str:
 
 
 class Agent:
-    def __init__(self, client, shell: Shell, mode: str, model: str):
+    def __init__(self, client, shell: Shell, mode: str, model: str, config: dict):
         self.client = client
         self.shell = shell
         self.mode = mode  # 'smart' | 'ask-all' | 'yolo'
         self.model = model
+        self.config = config
+        self.max_fix = int(config.get("max_fix_attempts", 3))
         self.messages: list[dict] = []
         self._approve_all = False  # set when the user picks "all" this run
+        self.consecutive_failures = 0
+        self._force_stop = False
 
     # -- decide whether a command runs without asking ----------------------
     def _auto_ok(self, tier: str) -> bool:
@@ -338,8 +390,12 @@ class Agent:
         # smart mode: safe runs automatically; everything else asks
         return tier == "safe"
 
-    def _execute(self, inp: dict) -> tuple[str, bool]:
-        """Returns (tool_result_text, is_error)."""
+    def _execute(self, inp: dict) -> tuple[str, bool, bool]:
+        """Returns (tool_result_text, is_error, is_command_failure).
+
+        is_command_failure is True only when a command actually ran and exited
+        non-zero — a user decline is an error to report but not a failed fix.
+        """
         command = inp.get("command", "")
         explanation = inp.get("explanation", "")
         interactive = bool(inp.get("interactive", False))
@@ -355,7 +411,7 @@ class Agent:
             if decision == "skip":
                 return ("User declined to run this command. "
                         "Suggest an alternative or ask what they'd prefer.",
-                        True)
+                        True, False)
             if decision == "all":
                 self._approve_all = True
         else:
@@ -382,14 +438,17 @@ class Agent:
             f"stdout:\n{result['stdout']}\n"
             f"stderr:\n{result['stderr']}"
         )
-        return payload, result["exit_code"] != 0
+        failed = result["exit_code"] != 0
+        return payload, failed, failed
 
     # -- one user turn -----------------------------------------------------
     def run_turn(self, user_text: str) -> None:
+        self.consecutive_failures = 0
+        self._force_stop = False
         self.messages.append({"role": "user", "content": user_text})
 
         while True:
-            final = self._stream_once()
+            final = self._stream_once(disable_tools=self._force_stop)
             self.messages.append({"role": "assistant", "content": final.content})
 
             if final.stop_reason != "tool_use":
@@ -399,7 +458,10 @@ class Agent:
             for block in final.content:
                 if block.type != "tool_use":
                     continue
-                text, is_error = self._execute(block.input)
+                text, is_error, is_failure = self._execute(block.input)
+                self.consecutive_failures = (
+                    self.consecutive_failures + 1 if is_failure else 0
+                )
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -407,16 +469,38 @@ class Agent:
                     "is_error": is_error,
                 })
 
+            # Bound the self-repair loop: once too many commands fail in a row,
+            # tell Claude to stop and summarize instead of churning forever.
+            if self.consecutive_failures >= self.max_fix and not self._force_stop:
+                tool_results.append({
+                    "type": "text",
+                    "text": (
+                        f"[prompter] {self.consecutive_failures} commands have "
+                        f"failed in a row, reaching the max_fix_attempts limit "
+                        f"({self.max_fix}). Stop running commands now. Briefly "
+                        f"explain what's going wrong and what the user could try."
+                    ),
+                })
+                self._force_stop = True
+                print(f"\n  {C.YELLOW}⚠ hit max_fix_attempts ({self.max_fix}); "
+                      f"asking Claude to summarize and stop.{C.RESET}")
+
             self.messages.append({"role": "user", "content": tool_results})
 
-    def _stream_once(self):
+    def _stream_once(self, disable_tools: bool = False):
+        workspace = os.path.expanduser(self.config.get("default_workspace", "~"))
+        prefs = self.config.get("preferences") or []
+        prefs_text = "\n".join(f"- {p}" for p in prefs) if prefs else "(none)"
         context = (
             f"[environment] os={platform.system()} "
             f"({platform.release()}); shell={os.environ.get('SHELL', 'unknown')}; "
-            f"cwd={self.shell.cwd}; home={os.path.expanduser('~')}"
+            f"cwd={self.shell.cwd}; home={os.path.expanduser('~')}\n"
+            f"[default workspace] {workspace}  "
+            f"(use for new projects when the user doesn't say where; "
+            f"mkdir -p it if missing)\n"
+            f"[user preferences]\n{prefs_text}"
         )
-        printed_any = False
-        with self.client.messages.stream(
+        kwargs = dict(
             model=self.model,
             max_tokens=8000,
             system=[
@@ -426,7 +510,11 @@ class Agent:
             thinking={"type": "adaptive"},
             tools=[RUN_TOOL],
             messages=self.messages,
-        ) as stream:
+        )
+        if disable_tools:
+            kwargs["tool_choice"] = {"type": "none"}
+        printed_any = False
+        with self.client.messages.stream(**kwargs) as stream:
             for event in stream:
                 if (event.type == "content_block_delta"
                         and event.delta.type == "text_delta"):
@@ -458,24 +546,34 @@ def build_client():
         sys.exit(f"Could not initialize the Anthropic client: {e}")
 
 
-def make_agent(args) -> Agent:
+def make_agent(args, config: dict) -> Agent:
     if not (os.environ.get("ANTHROPIC_API_KEY")
             or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
         # The SDK can still resolve an `ant auth login` profile, so we only
         # warn rather than hard-fail.
         print(f"{C.DIM}Note: no ANTHROPIC_API_KEY set; relying on a saved "
               f"Anthropic login if you have one.{C.RESET}", file=sys.stderr)
-    mode = "smart"
+
+    # CLI flags override config values for this run.
+    if args.workspace:
+        config["default_workspace"] = args.workspace
+    if args.max_fix is not None:
+        config["max_fix_attempts"] = args.max_fix
+
     if args.yolo:
         mode = "yolo"
-    elif args.ask_all:
+    elif args.ask_all or not config.get("auto_approve_safe", True):
         mode = "ask-all"
-    return Agent(build_client(), Shell(), mode, args.model)
+    else:
+        mode = "smart"
+    return Agent(build_client(), Shell(), mode, args.model, config)
 
 
-def banner(mode: str):
+def banner(mode: str, config: dict):
     print(f"{C.MAGENTA}{C.BOLD}prompter{C.RESET} "
           f"{C.DIM}· natural-language shell agent · mode={mode}{C.RESET}")
+    print(f"{C.DIM}workspace: {os.path.expanduser(config['default_workspace'])}"
+          f" · max-fix: {config['max_fix_attempts']}{C.RESET}")
     if mode == "yolo":
         print(f"{C.RED}{C.BOLD}⚠ YOLO mode: every command runs without "
               f"asking, including dangerous ones.{C.RESET}")
@@ -488,14 +586,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("prompt", nargs="*", help="What you want done.")
     parser.add_argument("--model", default=MODEL, help=f"Model (default {MODEL}).")
+    parser.add_argument("--workspace",
+                        help="Override the default project workspace this run.")
+    parser.add_argument("--max-fix", type=int, default=None,
+                        help="Max commands that may fail in a row before stopping.")
     parser.add_argument("--ask-all", action="store_true",
                         help="Confirm every command, even safe ones.")
     parser.add_argument("--yolo", action="store_true",
                         help="Run everything without confirmation (dangerous).")
+    parser.add_argument("--config", action="store_true",
+                        help="Print the config file path and exit.")
     args = parser.parse_args(argv)
 
-    agent = make_agent(args)
-    banner(agent.mode)
+    if args.config:
+        load_config()  # ensure it exists
+        print(CONFIG_PATH)
+        return 0
+
+    config = load_config()
+    agent = make_agent(args, config)
+    banner(agent.mode, config)
 
     goal = " ".join(args.prompt).strip()
     try:

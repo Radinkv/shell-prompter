@@ -34,9 +34,48 @@ without activating the venv, install with [pipx](https://pipx.pypa.io) instead:
 pipx install -e /path/to/shell-prompter
 ```
 
+## Config & defaults
+
+On first run, prompter writes `~/.prompter/config.json`:
+
+```json
+{
+  "default_workspace": "~/Code",
+  "max_fix_attempts": 3,
+  "auto_approve_safe": true,
+  "preferences": [
+    "When compiling C++, prefer clang++ with -std=c++17, and fall back to g++ if clang++ isn't available."
+  ]
+}
+```
+
+- **`default_workspace`** — where new projects go when you don't say where. So
+  `prompter "make a project called hunchday and run claude"` creates
+  `~/Code/hunchday`, not a folder in whatever directory you happened to be in.
+- **`preferences`** — free-form lines handed straight to the model. Add your own
+  (`"Use pnpm, not npm."`, `"Default Python to a .venv."`) and they're respected.
+- **`max_fix_attempts`** — see the retry section below.
+- **`auto_approve_safe`** — set to `false` to make prompter confirm *everything*.
+
+Run `prompter --config` to print the path. Override per-run with `--workspace`
+and `--max-fix`.
+
+## Self-repair, bounded
+
+prompter runs a command, sees the **actual error**, and decides the next step —
+so "compile with clang++" failing because clang++ isn't installed leads to a
+retry with `g++` on its own, no scripted repair rules needed.
+
+To stop it churning forever on a wedged step, `max_fix_attempts` (default 3)
+caps how many commands may fail **in a row**. Hit the cap and prompter tells
+Claude to stop, summarize what went wrong, and hand it back to you. A command
+*you* decline doesn't count against the limit — only commands that actually ran
+and failed.
+
 ## How it works
 
-1. Your request + your OS, shell, and current directory go to Claude.
+1. Your request + your OS, shell, current directory, default workspace, and
+   preferences go to Claude.
 2. Claude works toward the goal by calling a `run_command` tool, one command
    at a time, reacting to each result before deciding the next step.
 3. Every proposed command is graded into a **risk tier**:
@@ -66,11 +105,14 @@ When prompter asks, you can answer:
 
 ## Flags
 
-| Flag         | Effect                                                       |
-|--------------|-------------------------------------------------------------|
-| `--ask-all`  | Confirm **every** command, including safe ones.             |
-| `--yolo`     | Run everything with no confirmation. Dangerous — use sparingly. |
-| `--model ID` | Override the model (default `claude-opus-4-8`).             |
+| Flag            | Effect                                                    |
+|-----------------|-----------------------------------------------------------|
+| `--workspace P` | Override `default_workspace` for this run.                |
+| `--max-fix N`   | Override `max_fix_attempts` for this run.                 |
+| `--ask-all`     | Confirm **every** command, including safe ones.           |
+| `--yolo`        | Run everything with no confirmation. Dangerous — use sparingly. |
+| `--model ID`    | Override the model (default `claude-opus-4-8`).           |
+| `--config`      | Print the config file path and exit.                      |
 
 ## Interactive programs
 
