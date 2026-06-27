@@ -53,10 +53,13 @@ _BULLET_RE = re.compile(r"^(\s*)[-*+]\s+(.*)$")
 _ORDERED_RE = re.compile(r"^(\s*)(\d+\.)\s+(.*)$")
 _FENCE_RE = re.compile(r"^\s*```")
 _FENCE_MARK = "```"
+_RULE_RE = re.compile(r"^\s*([-*_])(?:\s*\1){2,}\s*$")
 
 _MAX_HEADING_HASHES = 6
+_RULE_CHARS = "-*_"
 _BULLET = "• "
 _QUOTE_GUTTER = "│ "
+_RULE = "─" * 40
 
 
 def _is_space(char: str) -> bool:
@@ -252,10 +255,12 @@ def _classify(line: str) -> str:
         if rest == EMPTY:
             return _KIND_UNDECIDED
         return _KIND_BLOCK if rest[0] == " " else _KIND_PARAGRAPH
-    if head in "-+*":
-        if len(stripped) == 1:
+    if head in "-+*_":
+        if head != "_" and len(stripped) >= 2 and stripped[1] == " ":
+            return _KIND_BLOCK
+        if head in _RULE_CHARS and set(stripped) == {head}:
             return _KIND_UNDECIDED
-        return _KIND_BLOCK if stripped[1] == " " else _KIND_PARAGRAPH
+        return _KIND_UNDECIDED if len(stripped) == 1 else _KIND_PARAGRAPH
     if head == _BACKTICK:
         if stripped.startswith(_FENCE_MARK):
             return _KIND_BLOCK
@@ -310,10 +315,10 @@ class MarkdownStream:
         rendered = (_style_inline(rest, self.c)
                     if self._kind == _KIND_PARAGRAPH else self._render(self._line))
         self._reset()
-        return rendered
+        return rendered if rendered is not None else EMPTY
 
     def _settle(self) -> str:
-        if self._in_fence:
+        if self._in_fence or _RULE_RE.match(self._line):
             return _KIND_BLOCK
         return _KIND_BLOCK if _classify(self._line) == _KIND_BLOCK else _KIND_PARAGRAPH
 
@@ -342,6 +347,8 @@ class MarkdownStream:
         rendered = (_style_inline(rest, self.c)
                     if self._kind == _KIND_PARAGRAPH else self._render(self._line))
         self._reset()
+        if rendered is None:
+            return EMPTY
         return rendered + NEWLINE
 
     def _reset(self) -> None:
@@ -349,13 +356,15 @@ class MarkdownStream:
         self._shown = 0
         self._kind = None
 
-    def _render(self, line: str) -> str:
+    def _render(self, line: str) -> str | None:
         c = self.c
         if _FENCE_RE.match(line):
             self._in_fence = not self._in_fence
-            return c.DIM + line + c.RESET
+            return None
         if self._in_fence:
-            return c.DIM + line + c.RESET
+            return line
+        if _RULE_RE.match(line):
+            return c.DIM + _RULE + c.RESET
 
         heading = _HEADING_RE.match(line)
         if heading:

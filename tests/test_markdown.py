@@ -93,8 +93,33 @@ def test_bold_assembles_across_chunks_and_ends_line():
     assert C.BOLD in out and out.endswith("\n")
 
 
-def test_fenced_code_block_is_not_inline_styled():
+def test_fenced_code_block_hides_markers_and_keeps_content_plain():
     md = MarkdownStream(C)
-    out = md.feed("```\nx = a *b* c\n```\n")
+    out = md.feed("```text\nx = a *b* c\n```\n")
+    assert "```" not in out
+    assert "text" not in out
+    assert "x = a *b* c" in out
     assert C.ITALIC not in out
-    assert C.DIM in out
+    assert C.DIM not in out
+
+
+def test_fenced_block_keeps_markdown_source_literal():
+    md = MarkdownStream(C)
+    out = md.feed("```\n# Not a heading\n**not bold**\n```\n")
+    assert "# Not a heading" in out
+    assert "**not bold**" in out
+    assert C.BOLD not in out
+
+
+def test_horizontal_rule_becomes_a_divider():
+    md = MarkdownStream(C)
+    out = md.feed("---\n")
+    assert "---" not in out
+    assert "─" in out and C.DIM in out
+
+
+def test_dashes_with_text_stay_literal():
+    md = MarkdownStream(C)
+    out = md.feed("-- a note\n")
+    assert "-- a note" in out
+    assert "─" not in out
