@@ -36,7 +36,7 @@ _FORCE_STOP_TEMPLATE = (
 
 _RUN_QUESTION = "run?"
 _ANSWER_HINT_TEMPLATE = (
-    "[{green}y{reset}es / {yellow}n{reset}o / {cyan}a{reset}ll / {red}q{reset}uit]"
+    "[{green}yes{reset} / {yellow}no{reset} / {cyan}all{reset} / {red}quit{reset}]"
 )
 _RETRY_PROMPT = "  Please answer y, n, a, or q."
 
