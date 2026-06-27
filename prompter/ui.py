@@ -14,6 +14,7 @@ from enum import Enum
 from .colors import Palette, palette as default_palette
 from .config import ApprovalMode, Config, PROGRAM_NAME
 from .constants import EMPTY, NEWLINE
+from .markdown import MarkdownStream
 from .risk import RiskAssessment
 from .shell import CommandResult
 
@@ -115,9 +116,14 @@ _ANSWERS = {
 
 
 class Console:
-    def __init__(self, palette: Palette | None = None):
+    def __init__(self, palette: Palette | None = None, render_markdown: bool = True):
         self.c = palette or default_palette
         self._stream_open = False
+        self._render_markdown = render_markdown
+        self._md: MarkdownStream | None = None
+
+    def set_markdown(self, enabled: bool) -> None:
+        self._render_markdown = enabled
 
     def banner(self, config: Config, mode: ApprovalMode) -> None:
         c = self.c
@@ -199,19 +205,26 @@ class Console:
 
     def begin_stream(self) -> None:
         self._stream_open = False
+        self._md = (MarkdownStream(self.c)
+                    if self._render_markdown and self.c.RESET else None)
 
     def stream_text(self, text: str) -> None:
         if not self._stream_open:
-            sys.stdout.write(_STREAM_OPEN.format(cyan=self.c.CYAN))
+            opener = NEWLINE if self._md else _STREAM_OPEN.format(cyan=self.c.CYAN)
+            sys.stdout.write(opener)
             self._stream_open = True
-        sys.stdout.write(text)
+        sys.stdout.write(self._md.feed(text) if self._md else text)
         sys.stdout.flush()
 
     def end_stream(self) -> None:
-        if self._stream_open:
+        if not self._stream_open:
+            return
+        if self._md:
+            sys.stdout.write(self._md.flush() + NEWLINE)
+        else:
             sys.stdout.write(_STREAM_CLOSE.format(reset=self.c.RESET))
-            sys.stdout.flush()
-            self._stream_open = False
+        sys.stdout.flush()
+        self._stream_open = False
 
     def note(self, text: str) -> None:
         print(_NOTE_LINE.format(dim=self.c.DIM, text=text, reset=self.c.RESET),

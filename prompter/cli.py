@@ -83,6 +83,7 @@ _FLAG_YOLO = "--yolo"
 _FLAG_CONCISE = "--concise"
 _FLAG_VERBOSE = "--verbose"
 _FLAG_USAGE = "--usage"
+_FLAG_RAW = "--raw"
 _ACTION_STORE_TRUE = "store_true"
 
 _LABEL_ADD_IT = "add it"
@@ -171,6 +172,7 @@ Run flags (modify one run):
   --concise                         no code comments, minimal explanation
   --verbose                         full comments and explanation (overrides --concise/config)
   --usage                           print token usage (and cost if priced) per run
+  --raw                             don't render markdown; print the model's text as-is
 
 Manage:
   prompter keys add <provider> <key>    store an API key
@@ -270,6 +272,7 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument(_FLAG_CONCISE, action=_ACTION_STORE_TRUE)
     parser.add_argument(_FLAG_VERBOSE, action=_ACTION_STORE_TRUE)
     parser.add_argument(_FLAG_USAGE, action=_ACTION_STORE_TRUE)
+    parser.add_argument(_FLAG_RAW, action=_ACTION_STORE_TRUE)
     return parser
 
 
@@ -303,6 +306,8 @@ def _apply_overrides(args, config: Config) -> None:
         config.concise = False
     if args.usage:
         config.show_usage = True
+    if args.raw:
+        config.render_markdown = False
     pinned = config.model if config_provider == config.provider else EMPTY
     config.model = args.model or pinned or default_model_for(config.provider)
 
@@ -382,6 +387,7 @@ def cmd_run(argv: list[str], console: Console) -> int:
         agent, config, mode = _prepare(args, console)
     except _CommandError as e:
         return _fail(console, e.title, e.hints, e.detail)
+    console.set_markdown(config.render_markdown)
     console.banner(config, mode)
     return _run_agent(agent, config, console, SPACE.join(args.prompt).strip())
 

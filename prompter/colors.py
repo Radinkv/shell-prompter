@@ -12,6 +12,7 @@ ENV_NO_COLOR = "NO_COLOR"
 _RESET = "\033[0m"
 _BOLD = "\033[1m"
 _DIM = "\033[2m"
+_ITALIC = "\033[3m"
 _RED = "\033[31m"
 _GREEN = "\033[32m"
 _YELLOW = "\033[33m"
@@ -36,6 +37,7 @@ class Palette:
         self.RESET = pick(_RESET)
         self.BOLD = pick(_BOLD)
         self.DIM = pick(_DIM)
+        self.ITALIC = pick(_ITALIC)
         self.RED = pick(_RED)
         self.GREEN = pick(_GREEN)
         self.YELLOW = pick(_YELLOW)

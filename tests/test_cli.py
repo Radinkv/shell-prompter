@@ -76,6 +76,13 @@ def test_usage_flag_enables():
     assert cfg.show_usage is True
 
 
+def test_raw_flag_disables_markdown():
+    cfg = Config()
+    assert cfg.render_markdown is True
+    cli._apply_overrides(parse(["--raw"]), cfg)
+    assert cfg.render_markdown is False
+
+
 @pytest.mark.parametrize("given, expected", [
     ("Gemini", "gemini"), ("OPENAI", "openai"), ("claude", "anthropic"),
     ("gpt", "openai"), ("google", "gemini"),

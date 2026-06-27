@@ -87,6 +87,7 @@ On first run prompter writes `~/.prompter/config.json`:
 | `auto_approve_safe` | Set to `false` to confirm every command, including safe ones. |
 | `concise` | Set to `true` to make the model write code and scripts with no comments and skip the closing explanation. Saves tokens. Off by default; override per run with `--concise` / `--verbose`. |
 | `show_usage` | Set to `true` to print token usage after each run. Off by default; enable per run with `--usage`. |
+| `render_markdown` | Render the model's markdown (bold, headings, lists, code) as styled terminal text. On by default; disable per run with `--raw`. Always off when output isn't a TTY, so pipes stay plain. |
 | `pricing` | Optional per-model price map for a cost estimate, e.g. `{"claude-sonnet-4-6": {"input": 3.0, "output": 15.0}}` (USD per million tokens). Without it the usage line shows tokens only. |
 | `preferences` | Free-form lines passed straight to the model, such as `"Use pnpm, not npm."` |
 
@@ -271,6 +272,7 @@ Flags modify a single run and sit alongside the goal (`prompter --yolo "..."`).
 | `--concise` | No code comments, minimal explanation, for this run. |
 | `--verbose` | Full comments and explanation, even if `concise` is set in config. |
 | `--usage` | Print token usage (and cost, if `pricing` is set) after the run. |
+| `--raw` | Print the model's text as-is, without rendering markdown. |
 
 ## Project layout
 

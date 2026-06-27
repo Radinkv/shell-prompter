@@ -139,6 +139,7 @@ class Config:
     auto_approve_safe: bool = True
     concise: bool = False
     show_usage: bool = False
+    render_markdown: bool = True
     pricing: dict = field(default_factory=dict)
     preferences: list[str] = field(
         default_factory=lambda: list(DEFAULT_PREFERENCES)

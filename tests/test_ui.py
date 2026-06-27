@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from prompter.colors import Palette
 from prompter.config import ApprovalMode, Config
 from prompter.risk import RiskAssessment, RiskTier
 from prompter.shell import CommandResult
@@ -112,3 +113,23 @@ def test_retry_notice(console, capsys):
     err = capsys.readouterr().err
     assert "retrying in 2s (1/3)" in err
     assert "rate limited" in err
+
+
+def test_stream_renders_markdown_when_colour_on(capsys):
+    from prompter.ui import Console
+    c = Console(Palette(enabled=True))
+    c.begin_stream()
+    c.stream_text("## Title\n")
+    c.end_stream()
+    out = capsys.readouterr().out
+    assert Palette(enabled=True).BOLD in out
+    assert "## " not in out
+
+
+def test_stream_passthrough_when_markdown_disabled(capsys):
+    from prompter.ui import Console
+    c = Console(Palette(enabled=True), render_markdown=False)
+    c.begin_stream()
+    c.stream_text("## Title\n")
+    c.end_stream()
+    assert "## Title" in capsys.readouterr().out
