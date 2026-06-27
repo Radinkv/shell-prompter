@@ -152,9 +152,9 @@ decides whether it runs on its own or asks first.
 
 | Tier | Examples | Default |
 |------|----------|---------|
-| 🟢 SAFE | `ls`, `cd`, `mkdir`, `git status`, `cat` | runs automatically |
-| 🟡 CONFIRM | `brew install`, `pip install`, `git clone`, `mv`, `rm`, `curl` | asks first |
-| 🔴 DANGER | `rm -rf`, `sudo`, `curl ... \| sh`, force-push, `dd` | asks first, shown in red |
+| 🟢 SAFE | `ls`, `cd`, `mkdir`, `git status`, `cat`, `... 2>/dev/null` | runs automatically |
+| 🟡 CONFIRM | `brew install`, `pip install`, `git clone`, `mv`, `rm`, `curl`, `git clean -f` | asks first |
+| 🔴 DANGER | `rm -rf`, `sudo`/`su`/`pkexec`, `curl ... \| sh`, force-push, `dd`, `shutdown`, `shred` | asks first, shown in red |
 
 When prompter asks, you answer:
 
@@ -163,8 +163,10 @@ When prompter asks, you answer:
 - `a`: run it and auto-approve the rest of this run
 - `q`: quit
 
-`curl ... | sh` is always DANGER, because it runs code you have not seen.
-`--yolo` removes the gate entirely. Use it only when you trust the task.
+Piping a download into an interpreter (`curl ... | sh`, and likewise `bash`,
+`python`, `perl`, `ruby`, `node`) is always DANGER, because it runs code you
+have not seen. `--yolo` removes the gate entirely. Use it only when you trust
+the task.
 
 ## Self-repair
 

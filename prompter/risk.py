@@ -60,7 +60,9 @@ def _rule(regex: str, reason: str) -> RiskRule:
 DANGER_RULES = [
     _rule(r"\brm\b[^|;&]*\s-[a-z]*[rf]", "recursive/forced delete"),
     _rule(r"\bsudo\b", "runs with root privileges"),
-    _rule(r"\bdoas\b", "runs with elevated privileges"),
+    _rule(r"\b(doas|su|pkexec)\b", "runs with elevated privileges"),
+    _rule(r"\b(shutdown|reboot|halt|poweroff)\b", "powers off or restarts the machine"),
+    _rule(r"\bshred\b", "irrecoverably destroys a file"),
     _rule(r"\bmkfs\b", "formats a filesystem"),
     _rule(r"\bdd\b\s+.*of=", "raw disk write with dd"),
     _rule(r">\s*/dev/(sd|disk|nvme|hd)", "writes directly to a disk device"),
@@ -69,7 +71,8 @@ DANGER_RULES = [
     _rule(r":\(\)\s*\{.*\|.*&\s*\}", "looks like a fork bomb"),
     _rule(r"\bgit\b.*\bpush\b.*(--force|-f)\b",
           "force-push (rewrites remote history)"),
-    _rule(r"(curl|wget)\b[^|]*\|\s*(sudo\s+)?(sh|bash|zsh)\b",
+    _rule(r"(curl|wget)\b[^|]*\|\s*(sudo\s+)?"
+          r"(sh|bash|zsh|fish|python3?|perl|ruby|node)\b",
           "downloads and executes code from the internet"),
     _rule(r"\beval\b", "evaluates a constructed command string"),
     _rule(r"\brm\b[^|;&]*\s+(/|~|\$HOME)\s*$", "deletes your home or root"),
@@ -91,8 +94,10 @@ CONFIRM_RULES = [
     _rule(r"\bkill(all)?\b", "terminates processes"),
     _rule(r"\bgit\b\s+(reset|checkout|restore)\b.*--hard",
           "discards local changes"),
+    _rule(r"\bgit\b\s+clean\b[^|;&]*\s-[a-z]*f", "deletes untracked files"),
     _rule(r"\bdocker\b\s+(run|rm|rmi|system\s+prune)", "modifies Docker state"),
-    _rule(r">\s*[^|&\s]", "redirects output into a file (may overwrite)"),
+    _rule(r">\s*(?!/dev/(null|stdout|stderr)\b)[^|&\s]",
+          "redirects output into a file (may overwrite)"),
 ]
 
 RISK_REGISTRY = [
