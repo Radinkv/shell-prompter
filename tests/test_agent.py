@@ -12,6 +12,7 @@ from prompter.providers.base import (
     ToolResultsMessage,
     UserMessage,
 )
+from prompter.providers.base import ToolResult
 from prompter.risk import RiskTier
 from prompter.shell import CommandResult
 from prompter.ui import Decision
@@ -154,3 +155,32 @@ def test_interactive_skips_output_render(mock_console):
     agent.run_turn("launch claude")
     assert shell.calls == [("claude", True)]
     mock_console.command_output.assert_not_called()
+
+
+class _RecordingProvider:
+    """Captures the history it is handed so we can assert what the model sees."""
+
+    name = "rec"
+    model = "m"
+
+    def __init__(self):
+        self.seen = None
+
+    def complete(self, history, _system_texts, _disable_tools, _on_text):
+        self.seen = history
+        return make_turn(text="done")
+
+
+def test_complete_sends_compacted_history(mock_console):
+    from prompter.history import _ELISION
+    provider = _RecordingProvider()
+    agent = _agent(provider, FakeShell(), mock_console)
+    big = "exit_code: 0\n" + "\n".join(f"l{i}" for i in range(300)) + "\nInstalled x"
+    agent.conversation.add_tool_results([ToolResult("c1", big, False)])
+    agent.conversation.add_tool_results([ToolResult("c2", "r1", False)])
+    agent.conversation.add_tool_results([ToolResult("c3", "r2", False)])
+
+    agent._complete()
+
+    assert _ELISION in provider.seen[0].results[0].content   # model gets slimmed copy
+    assert agent.conversation.history[0].results[0].content == big  # record untouched

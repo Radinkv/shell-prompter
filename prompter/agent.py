@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import ApprovalMode, Config
+from .history import compact
 from .prompts import build_system_texts
 from .providers.base import (
     AssistantMessage,
@@ -126,7 +127,7 @@ class Agent:
         system_texts = build_system_texts(self.config, self.shell.cwd)
         self.console.begin_stream()
         turn = self.provider.complete(
-            self.conversation.history,
+            compact(self.conversation.history),
             system_texts,
             self._force_stop,
             self.console.stream_text,
