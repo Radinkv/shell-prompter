@@ -58,6 +58,18 @@ def test_model_flag_wins():
     assert cfg.model == "g-x"
 
 
+def test_concise_flag_enables():
+    cfg = Config()
+    cli._apply_overrides(parse(["--concise"]), cfg)
+    assert cfg.concise is True
+
+
+def test_verbose_flag_overrides_config_concise():
+    cfg = Config(concise=True)
+    cli._apply_overrides(parse(["--verbose"]), cfg)
+    assert cfg.concise is False
+
+
 @pytest.mark.parametrize("given, expected", [
     ("Gemini", "gemini"), ("OPENAI", "openai"), ("claude", "anthropic"),
     ("gpt", "openai"), ("google", "gemini"),

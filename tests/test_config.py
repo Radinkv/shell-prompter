@@ -18,6 +18,12 @@ def test_defaults():
     assert cfg.key_env == "ANTHROPIC_API_KEY"
     assert cfg.base_url is None
     assert cfg.max_fix_attempts == 3
+    assert cfg.concise is False
+
+
+def test_concise_round_trips():
+    restored = Config.from_dict(Config(concise=True).to_dict())
+    assert restored.concise is True
 
 
 @pytest.mark.parametrize("provider, model", [

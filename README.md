@@ -85,6 +85,7 @@ On first run prompter writes `~/.prompter/config.json`:
 | `api_key_env` | The environment variable that holds the API key. Defaults to `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`. |
 | `max_fix_attempts` | How many commands may fail in a row before prompter stops. See [Self-repair](#self-repair). |
 | `auto_approve_safe` | Set to `false` to confirm every command, including safe ones. |
+| `concise` | Set to `true` to make the model write code and scripts with no comments and skip the closing explanation. Saves tokens. Off by default; override per run with `--concise` / `--verbose`. |
 | `preferences` | Free-form lines passed straight to the model, such as `"Use pnpm, not npm."` |
 
 Run `prompter config` to print the path, or `prompter status` to see the
@@ -257,6 +258,8 @@ Flags modify a single run and sit alongside the goal (`prompter --yolo "..."`).
 | `--max-fix N` | Override `max_fix_attempts`. |
 | `--ask-all` | Confirm every command, including safe ones. |
 | `--yolo` | Run everything with no confirmation. Dangerous. |
+| `--concise` | No code comments, minimal explanation, for this run. |
+| `--verbose` | Full comments and explanation, even if `concise` is set in config. |
 
 ## Project layout
 

@@ -126,6 +126,7 @@ class Config:
     api_key_env: str | None = None
     max_fix_attempts: int = DEFAULT_MAX_FIX_ATTEMPTS
     auto_approve_safe: bool = True
+    concise: bool = False
     preferences: list[str] = field(
         default_factory=lambda: list(DEFAULT_PREFERENCES)
     )

@@ -80,6 +80,8 @@ _FLAG_WORKSPACE = "--workspace"
 _FLAG_MAX_FIX = "--max-fix"
 _FLAG_ASK_ALL = "--ask-all"
 _FLAG_YOLO = "--yolo"
+_FLAG_CONCISE = "--concise"
+_FLAG_VERBOSE = "--verbose"
 _ACTION_STORE_TRUE = "store_true"
 
 _LABEL_ADD_IT = "add it"
@@ -165,6 +167,8 @@ Run flags (modify one run):
   --max-fix N                       failures in a row before stopping
   --ask-all                         confirm every command
   --yolo                            run everything with no confirmation
+  --concise                         no code comments, minimal explanation
+  --verbose                         full comments and explanation (overrides config)
 
 Manage:
   prompter keys add <provider> <key>    store an API key
@@ -261,6 +265,8 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument(_FLAG_MAX_FIX, type=int, default=None)
     parser.add_argument(_FLAG_ASK_ALL, action=_ACTION_STORE_TRUE)
     parser.add_argument(_FLAG_YOLO, action=_ACTION_STORE_TRUE)
+    parser.add_argument(_FLAG_CONCISE, action=_ACTION_STORE_TRUE)
+    parser.add_argument(_FLAG_VERBOSE, action=_ACTION_STORE_TRUE)
     return parser
 
 
@@ -288,6 +294,10 @@ def _apply_overrides(args, config: Config) -> None:
         config.default_workspace = args.workspace
     if args.max_fix is not None:
         config.max_fix_attempts = args.max_fix
+    if args.concise:
+        config.concise = True
+    if args.verbose:
+        config.concise = False
     pinned = config.model if config_provider == config.provider else EMPTY
     config.model = args.model or pinned or default_model_for(config.provider)
 

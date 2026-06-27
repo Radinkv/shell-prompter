@@ -59,6 +59,15 @@ comes back as "declined by user". Adapt and propose an alternative or ask.
 summary at the end is plenty. The user can see the commands and their output.
 - When the goal is achieved, say so concisely and stop calling tools."""
 
+CONCISE_INSTRUCTION = """\
+[concise mode]
+- Write code, scripts, and config files with NO comments. Emit only the code \
+needed to accomplish the task. Keep functional output the program itself needs \
+(print/echo statements, logging), but add no explanatory comments.
+- Skip the closing explanation. After the final command runs, give at most one \
+short sentence, or nothing -- the user can see the commands and their output. Do \
+not restate what the code does or walk through it."""
+
 
 def build_environment_context(config: Config, cwd: str) -> str:
     """The per-turn context block: OS, shell, cwd, workspace, preferences."""
@@ -79,5 +88,13 @@ def build_environment_context(config: Config, cwd: str) -> str:
 
 
 def build_system_texts(config: Config, cwd: str) -> list[str]:
-    """The ordered system messages: stable prompt first, volatile context last."""
-    return [SYSTEM_PROMPT, build_environment_context(config, cwd)]
+    """The ordered system messages: stable prompt first, volatile context last.
+
+    The concise instruction, when enabled, is stable too, so it sits with the
+    base prompt ahead of the per-turn environment block.
+    """
+    texts = [SYSTEM_PROMPT]
+    if config.concise:
+        texts.append(CONCISE_INSTRUCTION)
+    texts.append(build_environment_context(config, cwd))
+    return texts
