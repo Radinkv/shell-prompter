@@ -23,6 +23,9 @@ the outermost marker.
 The renderer never asks how wide the terminal is and never inserts its own line
 breaks. The terminal wraps the styled lines on its own, so resizing the window
 in the middle of a stream stays correct.
+
+DESIGN INSPIRED FROM EXPRESSION EVALUATOR.
+(https://github.com/Radinkv/DSA/blob/main/cpp/src/other/expression_evaluator.cpp)
 """
 
 from __future__ import annotations
