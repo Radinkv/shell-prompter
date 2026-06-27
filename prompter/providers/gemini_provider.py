@@ -159,8 +159,8 @@ def _chunk_usage(chunk) -> Usage | None:
 
 def _is_auth_error(error) -> bool:
     code = getattr(error, _ATTR_CODE, None) or getattr(error, _ATTR_STATUS_CODE, None)
-    if code in _AUTH_STATUS_CODES:
-        return True
+    if isinstance(code, int):
+        return code in _AUTH_STATUS_CODES
     return _AUTH_HINT in str(error).lower()
 
 
