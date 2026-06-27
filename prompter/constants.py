@@ -11,6 +11,7 @@ from __future__ import annotations
 EMPTY = ""
 NEWLINE = "\n"
 SPACE = " "
+PIPE = "|"
 COMMA_SPACE = ", "
 HOME_MARK = "~"
 FILE_WRITE_MODE = "w"

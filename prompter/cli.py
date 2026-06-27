@@ -26,6 +26,11 @@ from .config import (
     normalize_provider,
     save_config,
 )
+from .completion import (
+    CommandSurface,
+    SUPPORTED_SHELLS,
+    render as render_completion,
+)
 from .constants import COMMA_SPACE, EMPTY, SPACE
 from .keys import KEYS_PATH, clear_key, set_key, stored_key
 from .providers import (
@@ -48,6 +53,7 @@ _CMD_STATUS = "status"
 _CMD_CONFIG = "config"
 _CMD_RUN = "run"
 _CMD_HELP = "help"
+_CMD_COMPLETIONS = "completions"
 _HELP_FLAGS = ("-h", "--help")
 
 _KEYS_LIST = "list"
@@ -128,6 +134,11 @@ _TITLE_USE_USAGE = "Usage: prompter use <provider> [model]"
 _EXAMPLE_USE = "prompter use gemini"
 _DEFAULT_SET = "Default provider set to {provider} (model: {model})"
 
+_TITLE_COMPLETIONS_USAGE = "Usage: prompter completions <shell>"
+_EXAMPLE_COMPLETIONS = "prompter completions zsh"
+_TITLE_UNKNOWN_SHELL = 'Unknown shell "{shell}"'
+_LABEL_SUPPORTED = "supported"
+
 _KEYS_HEADER = "keys:"
 
 _HELP_TEXT = """\
@@ -153,6 +164,7 @@ Manage:
   prompter use <provider> [model]       set your default provider/model
   prompter status                       show the current setup
   prompter config                       print the config file path
+  prompter completions <shell>          print a tab-completion script (zsh, bash)
   prompter help                         show this help
 
 Providers: anthropic, openai, gemini
@@ -429,6 +441,18 @@ def cmd_config(argv: list[str], console: Console) -> int:
     return OK_EXIT_CODE
 
 
+def cmd_completions(argv: list[str], console: Console) -> int:
+    if not argv:
+        return _fail(console, _TITLE_COMPLETIONS_USAGE,
+                     [(_LABEL_EXAMPLE, _EXAMPLE_COMPLETIONS)])
+    shell = argv[0].lower()
+    if shell not in SUPPORTED_SHELLS:
+        return _fail(console, _TITLE_UNKNOWN_SHELL.format(shell=argv[0]),
+                     [(_LABEL_SUPPORTED, COMMA_SPACE.join(SUPPORTED_SHELLS))])
+    console.info(render_completion(shell, command_surface()))
+    return OK_EXIT_CODE
+
+
 def cmd_help(console: Console) -> int:
     console.info(_HELP_TEXT)
     return OK_EXIT_CODE
@@ -439,7 +463,32 @@ _COMMANDS = {
     _CMD_USE: cmd_use,
     _CMD_STATUS: cmd_status,
     _CMD_CONFIG: cmd_config,
+    _CMD_COMPLETIONS: cmd_completions,
 }
+
+
+def command_surface() -> CommandSurface:
+    """Describe the command surface for shell completion, read from the live
+    dispatcher and argument parser so completion never drifts from the CLI.
+
+    Flags are split by whether the parser has them consume a value; the two that
+    take a known kind of value are named so completion can suggest it.
+    """
+    bool_flags, value_flags = [], []
+    for action in _run_parser()._actions:
+        if not action.option_strings:
+            continue
+        (bool_flags if action.nargs == 0 else value_flags).extend(action.option_strings)
+    return CommandSurface(
+        commands=tuple(_COMMANDS) + (_CMD_HELP,),
+        bool_flags=tuple(bool_flags),
+        value_flags=tuple(value_flags),
+        provider_flags=(_FLAG_PROVIDER,),
+        dir_flags=(_FLAG_WORKSPACE,),
+        keys_actions=(_KEYS_LIST, _KEYS_ADD, _KEYS_REMOVE[0]),
+        keys_provider_actions=(_KEYS_ADD,) + _KEYS_REMOVE,
+        providers=tuple(known_providers()),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

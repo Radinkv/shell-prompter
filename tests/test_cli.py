@@ -255,6 +255,31 @@ def test_help():
     assert "prompter keys add" in console.info.call_args[0][0]
 
 
+@pytest.mark.parametrize("shell", ["zsh", "bash", "ZSH"])
+def test_completions_emits_script(shell):
+    console = MagicMock(spec=Console)
+    assert cli.cmd_completions([shell], console) == cli.OK_EXIT_CODE
+    script = console.info.call_args[0][0]
+    assert "_prompter" in script
+
+
+def test_completions_usage_without_shell():
+    console = MagicMock(spec=Console)
+    assert cli.cmd_completions([], console) == cli.ERROR_EXIT_CODE
+    console.problem.assert_called_once()
+
+
+def test_completions_unknown_shell():
+    console = MagicMock(spec=Console)
+    assert cli.cmd_completions(["fish"], console) == cli.ERROR_EXIT_CODE
+    console.problem.assert_called_once()
+
+
+def test_main_routes_to_completions(capsys):
+    assert cli.main(["completions", "zsh"]) == cli.OK_EXIT_CODE
+    assert "#compdef prompter" in capsys.readouterr().out
+
+
 def test_main_routes_to_keys(isolated):
     assert cli.main(["keys", "list"]) == cli.OK_EXIT_CODE
 

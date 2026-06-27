@@ -29,6 +29,12 @@ single install includes all three providers (Anthropic, OpenAI, and Gemini).
 Install it globally with [pipx](https://pipx.pypa.io):
 
 ```bash
+pipx install shell-prompter
+```
+
+To install the latest unreleased code instead, point pipx at the repository:
+
+```bash
 pipx install "git+https://github.com/Radinkv/shell-prompter.git"
 ```
 
@@ -200,7 +206,40 @@ opens a prompt.
 | `prompter use <provider> [model]` | Set your default provider and model. |
 | `prompter status` | Show the current provider, model, workspace, and keys. |
 | `prompter config` | Print the config file path. |
+| `prompter completions <shell>` | Print a tab-completion script (zsh, bash). See [Tab completion](#tab-completion). |
 | `prompter help` | Show usage. |
+
+## Tab completion
+
+`prompter completions <shell>` prints a completion script for `zsh` or `bash`.
+It completes subcommands, provider names, `keys` actions, and run flags. Install
+it once, then press TAB:
+
+```text
+$ prompter <TAB>
+keys  use  status  config  help
+$ prompter use <TAB>
+anthropic  gemini  openai
+```
+
+**zsh:**
+
+```bash
+mkdir -p ~/.zsh/completions
+prompter completions zsh > ~/.zsh/completions/_prompter
+# then, in ~/.zshrc before `compinit`:
+#   fpath=(~/.zsh/completions $fpath)
+#   autoload -Uz compinit && compinit
+```
+
+**bash:**
+
+```bash
+echo 'source <(prompter completions bash)' >> ~/.bashrc
+```
+
+Open a new shell for it to take effect. The provider list in the script is
+generated from the installed providers, so it stays current.
 
 ## Flags
 
@@ -231,6 +270,7 @@ prompter/
     anthropic_provider.py, openai_provider.py, gemini_provider.py
   ui.py          Console and Decision: all printing and input
   agent.py       Agent and Conversation: the orchestration loop
+  completion.py  shell completion script generation (zsh, bash)
   cli.py         command dispatch, run setup, actionable errors, main()
 tests/
   conftest.py, _helpers.py   fixtures and fakes (FakeProvider, FakeShell)
