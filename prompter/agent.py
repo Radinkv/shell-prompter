@@ -8,6 +8,7 @@ changes nothing here.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from .config import ApprovalMode, Config
@@ -18,6 +19,7 @@ from .providers.base import (
     AssistantMessage,
     AssistantTurn,
     ModelProvider,
+    ProviderError,
     ToolInvocation,
     ToolResult,
     ToolResultsMessage,
@@ -43,6 +45,9 @@ _PAYLOAD_TEMPLATE = (
     "stdout:\n{stdout}\n"
     "stderr:\n{stderr}"
 )
+
+MAX_RETRIES = 3
+_RETRY_BASE_DELAY_SECONDS = 2
 
 
 class QuitRequested(Exception):
@@ -138,17 +143,45 @@ class Agent:
 
     def _complete(self) -> AssistantTurn:
         system_texts = build_system_texts(self.config, self.shell.cwd)
-        self.console.begin_stream()
-        turn = self.provider.complete(
-            compact(self.conversation.history),
-            system_texts,
-            self._force_stop,
-            self.console.stream_text,
-        )
-        self.console.end_stream()
+        history = compact(self.conversation.history)
+        turn = self._complete_with_retry(history, system_texts)
         if turn.usage is not None:
             self._run_usage = self._run_usage + turn.usage
         return turn
+
+    def _complete_with_retry(self, history, system_texts) -> AssistantTurn:
+        """Call the provider, retrying transient failures with backoff.
+
+        A retry replays the whole turn, so it is only safe before any text has
+        streamed to the console; once output has started, a transient failure
+        propagates rather than risk printing the turn twice.
+        """
+        streamed = [False]
+
+        def on_text(text: str) -> None:
+            streamed[0] = True
+            self.console.stream_text(text)
+
+        attempt = 0
+        while True:
+            streamed[0] = False
+            self.console.begin_stream()
+            try:
+                turn = self.provider.complete(
+                    history, system_texts, self._force_stop, on_text)
+                self.console.end_stream()
+                return turn
+            except ProviderError as e:
+                self.console.end_stream()
+                if not self._may_retry(e, attempt, streamed[0]):
+                    raise
+                delay = _RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
+                self.console.retry_notice(str(e), attempt + 1, MAX_RETRIES, delay)
+                time.sleep(delay)
+                attempt += 1
+
+    def _may_retry(self, error: ProviderError, attempt: int, streamed: bool) -> bool:
+        return error.retryable and attempt < MAX_RETRIES and not streamed
 
     def _process_tool_calls(self, tool_calls: list[ToolInvocation]) -> list[ToolResult]:
         results = []

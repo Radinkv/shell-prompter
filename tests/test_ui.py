@@ -105,3 +105,10 @@ def test_usage_line_with_cost(console, capsys):
 def test_usage_line_without_cost(console, capsys):
     console.usage(10, 5, 0)
     assert "est $" not in capsys.readouterr().out
+
+
+def test_retry_notice(console, capsys):
+    console.retry_notice("rate limited (429) extra detail", 1, 3, 2)
+    err = capsys.readouterr().err
+    assert "retrying in 2s (1/3)" in err
+    assert "rate limited" in err

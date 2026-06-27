@@ -177,6 +177,12 @@ commands that fail in a row. At the limit, prompter tells the model to stop and
 explain what went wrong. A command you decline does not count. Only commands
 that ran and failed do.
 
+This is separate from network resilience. When a *model request* fails
+transiently (a rate limit, timeout, or 5xx), prompter retries it automatically
+with exponential backoff before giving up; a bad request or auth failure is not
+retried. A retry only happens before any of the turn's response has streamed, so
+output is never printed twice.
+
 ## How it works
 
 1. Your request, plus your OS, shell, current directory, default workspace, and

@@ -190,6 +190,12 @@ class _FakeOpenAIErrors:
     class OpenAIError(Exception):
         pass
 
+    class APITimeoutError(Exception):
+        pass
+
+    class APIConnectionError(Exception):
+        pass
+
 
 class _OpenAIClient:
     def __init__(self, chunks):
@@ -417,3 +423,56 @@ def test_gemini_captures_usage():
     assert turn.usage.input_tokens == 30
     assert turn.usage.output_tokens == 12
     assert turn.usage.cached_tokens == 9
+
+
+class _BoomTransient(Exception):
+    status_code = 503
+
+
+class _BoomPermanent(Exception):
+    status_code = 400
+
+
+class _FlakyProvider(base.ModelProvider):
+    api_errors = (_BoomTransient, _BoomPermanent)
+
+    def __init__(self, error):
+        super().__init__("m")
+        self._error = error
+
+    def build_request(self, history, system_texts, disable_tools):
+        return {}
+
+    def run_stream(self, request, collector):
+        raise self._error
+
+
+@pytest.mark.parametrize("status, retryable", [(503, True), (429, True), (400, False)])
+def test_is_transient_by_status_code(status, retryable):
+    error = _ns(status_code=status)
+    assert _FlakyProvider(None).is_transient(error) is retryable
+
+
+class _Timeout(Exception):
+    pass
+
+
+def test_is_transient_by_declared_error_type():
+    provider = _FlakyProvider(None)
+    provider.transient_errors = (_Timeout,)
+    assert provider.is_transient(_Timeout()) is True
+    assert provider.is_transient(ValueError("nope")) is False
+
+
+def test_complete_marks_transient_error_retryable():
+    with pytest.raises(base.ProviderError) as exc:
+        _FlakyProvider(_BoomTransient("overloaded")).complete(
+            [], ["s"], False, lambda _t: None)
+    assert exc.value.retryable is True
+
+
+def test_complete_marks_permanent_error_not_retryable():
+    with pytest.raises(base.ProviderError) as exc:
+        _FlakyProvider(_BoomPermanent("bad request")).complete(
+            [], ["s"], False, lambda _t: None)
+    assert exc.value.retryable is False

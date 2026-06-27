@@ -12,7 +12,7 @@ from prompter.providers.base import (
     ToolResultsMessage,
     UserMessage,
 )
-from prompter.providers.base import AssistantTurn, ToolResult, Usage
+from prompter.providers.base import AssistantTurn, ProviderError, ToolResult, Usage
 from prompter.risk import RiskTier
 from prompter.shell import CommandResult
 from prompter.ui import Decision
@@ -202,3 +202,62 @@ def test_usage_not_reported_when_disabled(mock_console):
     agent = _agent(provider, FakeShell(), mock_console)  # show_usage defaults False
     agent.run_turn("hi")
     mock_console.usage.assert_not_called()
+
+
+class _FlakyProvider:
+    """Fails `fails` times with a ProviderError, then returns a final turn.
+
+    on_stream, when set, streams text before failing -- to exercise the
+    no-retry-after-output guard.
+    """
+
+    name = "flaky"
+    model = "m"
+
+    def __init__(self, fails, retryable=True, stream_first=False):
+        self._fails = fails
+        self._retryable = retryable
+        self._stream_first = stream_first
+        self.calls = 0
+
+    def complete(self, _history, _system_texts, _disable_tools, on_text):
+        self.calls += 1
+        if self.calls <= self._fails:
+            if self._stream_first:
+                on_text("partial ")
+            raise ProviderError("rate limited", retryable=self._retryable)
+        return make_turn(text="recovered")
+
+
+def test_retries_transient_then_succeeds(mock_console, monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    provider = _FlakyProvider(fails=2)
+    _agent(provider, FakeShell(), mock_console).run_turn("go")
+    assert provider.calls == 3                       # 2 failures + 1 success
+    assert mock_console.retry_notice.call_count == 2
+
+
+def test_gives_up_after_max_retries(mock_console, monkeypatch):
+    from prompter.agent import MAX_RETRIES
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    provider = _FlakyProvider(fails=99)
+    with pytest.raises(ProviderError):
+        _agent(provider, FakeShell(), mock_console).run_turn("go")
+    assert provider.calls == MAX_RETRIES + 1
+
+
+def test_does_not_retry_permanent_error(mock_console, monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    provider = _FlakyProvider(fails=1, retryable=False)
+    with pytest.raises(ProviderError):
+        _agent(provider, FakeShell(), mock_console).run_turn("go")
+    assert provider.calls == 1
+    mock_console.retry_notice.assert_not_called()
+
+
+def test_does_not_retry_after_output_streamed(mock_console, monkeypatch):
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    provider = _FlakyProvider(fails=1, stream_first=True)
+    with pytest.raises(ProviderError):
+        _agent(provider, FakeShell(), mock_console).run_turn("go")
+    assert provider.calls == 1                       # streamed -> no replay

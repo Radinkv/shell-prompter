@@ -184,7 +184,15 @@ def tool_invocation_from_args(
 
 
 class ProviderError(Exception):
-    """A model request failed (network, server, bad request)."""
+    """A model request failed (network, server, bad request).
+
+    retryable marks a transient failure (rate limit, timeout, 5xx) that the
+    agent may retry with backoff; a bad request or auth failure is not.
+    """
+
+    def __init__(self, message: str = EMPTY, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class ProviderAuthError(ProviderError):
@@ -226,13 +234,28 @@ class TurnCollector:
         return AssistantTurn(EMPTY.join(self._text_parts), self._tool_calls, self._usage)
 
 
+_ATTR_STATUS_CODE = "status_code"
+_ATTR_ERROR_CODE = "code"
+RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+
+
 class ModelProvider(ABC):
     name: str = _BASE_PROVIDER_NAME
     auth_errors: tuple = ()
     api_errors: tuple = ()
+    transient_errors: tuple = ()
 
     def __init__(self, model: str):
         self.model = model
+
+    def is_transient(self, error: Exception) -> bool:
+        """Whether a failed request is worth retrying: a declared transient SDK
+        error (timeout, connection drop) or a retryable HTTP status."""
+        if self.transient_errors and isinstance(error, self.transient_errors):
+            return True
+        code = (getattr(error, _ATTR_STATUS_CODE, None)
+                or getattr(error, _ATTR_ERROR_CODE, None))
+        return code in RETRYABLE_STATUS_CODES
 
     def complete(
         self,
@@ -249,7 +272,7 @@ class ModelProvider(ABC):
         except self.auth_errors as e:
             raise ProviderAuthError(str(e)) from e
         except self.api_errors as e:
-            raise ProviderError(str(e)) from e
+            raise ProviderError(str(e), retryable=self.is_transient(e)) from e
         return collector.finish()
 
     @abstractmethod

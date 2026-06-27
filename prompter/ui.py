@@ -81,6 +81,9 @@ _USAGE_LINE = (
 )
 _USAGE_COST = " · est ${cost:.4f}"
 
+_RETRY_LINE = "  {yellow}⟳ retrying in {delay}s ({attempt}/{total}){reset} {dim}{reason}{reset}"
+_RETRY_REASON_MAX = 80
+
 
 class Decision(Enum):
     RUN = "run"
@@ -249,6 +252,13 @@ class Console:
         color = c.GREEN if present else c.DIM
         print(_KEY_ROW.format(provider=provider.ljust(_PROVIDER_WIDTH), color=color,
                               status=status, reset=c.RESET))
+
+    def retry_notice(self, reason: str, attempt: int, total: int, delay: int) -> None:
+        c = self.c
+        short = (reason or EMPTY).splitlines()[0][:_RETRY_REASON_MAX] if reason else EMPTY
+        print(_RETRY_LINE.format(yellow=c.YELLOW, delay=delay, attempt=attempt,
+                                 total=total, reset=c.RESET, dim=c.DIM, reason=short),
+              file=sys.stderr)
 
     def usage(self, input_tokens: int, output_tokens: int, cached_tokens: int,
               cost: float | None = None) -> None:

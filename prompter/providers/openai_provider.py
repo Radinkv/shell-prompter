@@ -168,6 +168,7 @@ class OpenAIProvider(ModelProvider):
         self._client = client
         self.auth_errors = (sdk.AuthenticationError,)
         self.api_errors = (sdk.OpenAIError,)
+        self.transient_errors = (sdk.APITimeoutError, sdk.APIConnectionError)
 
     def build_request(self, history, system_texts, disable_tools) -> dict:
         request = {

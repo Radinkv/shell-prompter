@@ -179,7 +179,7 @@ class GeminiProvider(ModelProvider):
         except self._errors.APIError as e:
             if _is_auth_error(e):
                 raise ProviderAuthError(str(e)) from e
-            raise ProviderError(str(e)) from e
+            raise ProviderError(str(e), retryable=self.is_transient(e)) from e
 
     def _to_contents(self, history: list[HistoryItem]) -> list:
         types = self._types

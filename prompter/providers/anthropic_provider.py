@@ -163,6 +163,7 @@ class AnthropicProvider(ModelProvider):
     name = PROVIDER_ANTHROPIC
     auth_errors = (anthropic.AuthenticationError,)
     api_errors = (anthropic.APIError,)
+    transient_errors = (anthropic.APITimeoutError, anthropic.APIConnectionError)
 
     def __init__(self, client, model: str):
         super().__init__(model)
