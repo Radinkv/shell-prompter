@@ -17,6 +17,7 @@ unchanged each turn, so it benefits without an explicit CachedContent resource.
 from __future__ import annotations
 
 from ..config import PROVIDER_GEMINI, Config
+from ..constants import EMPTY
 from ..keys import resolve_api_key
 from .base import (
     COMMAND_DESCRIPTION,
@@ -53,6 +54,7 @@ _GEMINI_BOOLEAN = "BOOLEAN"
 _AUTH_STATUS_CODES = {401, 403}
 _AUTH_HINT = "api key"
 
+_ATTR_TEXT = "text"
 _ATTR_FUNCTION_CALLS = "function_calls"
 _ATTR_CANDIDATES = "candidates"
 _ATTR_CONTENT = "content"
@@ -95,6 +97,23 @@ def _function_declaration(types):
 
 
 def _chunk_text(chunk) -> str | None:
+    """Concatenate the chunk's text parts.
+
+    Reading them directly avoids chunk.text, whose convenience accessor logs a
+    warning on every chunk that also carries a function_call part -- i.e. every
+    tool-calling turn. When a chunk exposes no candidate parts (a plain text
+    response, or a test stub), fall back to the .text accessor.
+    """
+    candidates = getattr(chunk, _ATTR_CANDIDATES, None)
+    if candidates:
+        texts = [
+            text
+            for candidate in candidates
+            for part in getattr(getattr(candidate, _ATTR_CONTENT, None),
+                                _ATTR_PARTS, None) or []
+            if (text := getattr(part, _ATTR_TEXT, None))
+        ]
+        return EMPTY.join(texts)
     try:
         return chunk.text
     except (ValueError, AttributeError):

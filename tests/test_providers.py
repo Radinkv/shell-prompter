@@ -317,6 +317,26 @@ def test_gemini_chunk_text_handles_raise():
     assert gp._chunk_text(_ns(text="hi")) == "hi"
 
 
+def test_gemini_chunk_text_reads_parts_not_accessor():
+    # Text lives in parts; .text would warn (here, raise). We must not call it.
+    class Boom:
+        candidates = [_ns(content=_ns(parts=[_ns(text="hello", function_call=None)]))]
+
+        @property
+        def text(self):
+            raise AssertionError(".text must not be accessed when parts exist")
+
+    assert gp._chunk_text(Boom()) == "hello"
+
+
+def test_gemini_chunk_text_skips_function_call_parts():
+    chunk = _ns(candidates=[_ns(content=_ns(parts=[
+        _ns(text="answer", function_call=None),
+        _ns(text=None, function_call=_ns(name="run_command", args={})),
+    ]))])
+    assert gp._chunk_text(chunk) == "answer"
+
+
 def test_gemini_chunk_calls_from_candidates():
     call = _ns(name="run_command", args={"command": "ls"})
     chunk = _ns(function_calls=None, candidates=[
