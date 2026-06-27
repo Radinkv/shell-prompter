@@ -57,6 +57,9 @@ _TOOL_KEY_NAME = "name"
 _TOOL_KEY_DESCRIPTION = "description"
 _TOOL_KEY_INPUT_SCHEMA = "input_schema"
 
+_CACHE_CONTROL = "cache_control"
+_CACHE_EPHEMERAL = {"type": "ephemeral"}
+
 _REQ_MODEL = "model"
 _REQ_MAX_TOKENS = "max_tokens"
 _REQ_SYSTEM = "system"
@@ -73,6 +76,26 @@ _RUN_TOOL = {
     _TOOL_KEY_DESCRIPTION: TOOL_DESCRIPTION,
     _TOOL_KEY_INPUT_SCHEMA: RUN_COMMAND_PARAMETERS,
 }
+
+
+def _system_blocks(system_texts: list[str]) -> list[dict]:
+    """Render system texts as blocks, caching the stable prefix.
+
+    build_system_texts puts the stable prompt first and the volatile per-turn
+    environment last. A cache_control breakpoint on the last stable block marks
+    that prefix. Since tools precede system in the request (the tool
+    definitions too), only the small environment block is re-sent uncached.
+
+
+    Anthropic only caches a prefix past a minimum size (~1024 tokens for Sonnet).
+    Today's prefix is under that, so this is a correctly-placed no-op that starts
+    paying off if the system prompt or tool set grows. It stays compaction-safe
+    because it caches only the fixed system prefix, never the churning history.
+    """
+    blocks = [{_FIELD_TYPE: _BLOCK_TEXT, _FIELD_TEXT: t} for t in system_texts]
+    if len(blocks) >= 2:
+        blocks[-2][_CACHE_CONTROL] = _CACHE_EPHEMERAL
+    return blocks
 
 
 def _to_messages(history: list[HistoryItem]) -> list[dict]:
@@ -129,7 +152,7 @@ class AnthropicProvider(ModelProvider):
         request = {
             _REQ_MODEL: self.model,
             _REQ_MAX_TOKENS: MAX_TOKENS,
-            _REQ_SYSTEM: [{_FIELD_TYPE: _BLOCK_TEXT, _FIELD_TEXT: t} for t in system_texts],
+            _REQ_SYSTEM: _system_blocks(system_texts),
             _REQ_THINKING: _THINKING_ADAPTIVE,
             _REQ_TOOLS: [_RUN_TOOL],
             _REQ_MESSAGES: _to_messages(history),

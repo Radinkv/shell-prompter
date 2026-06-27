@@ -7,6 +7,11 @@ adapter unchanged.
 Supplies the template method's two steps. build_request renders neutral history
 into Chat Completions messages. run_stream accumulates streamed text and
 tool-call deltas into the collector.
+
+Prompt caching needs no code here: OpenAI caches identical prompt prefixes over
+1024 tokens automatically, and our stable system prefix is sent unchanged each
+turn, so it benefits for free. (OpenAI-compatible endpoints apply their own
+rules.)
 """
 
 from __future__ import annotations

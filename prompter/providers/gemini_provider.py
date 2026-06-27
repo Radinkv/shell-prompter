@@ -8,6 +8,10 @@ Gemini matches tool calls by function name (and an optional id) rather than an
 opaque id like the other providers, so the round-trip uses the shared TOOL_NAME.
 This adapter is written against the documented google-genai surface. Verify the
 function-call round-trip with a live smoke test.
+
+Prompt caching needs no code here: Gemini 2.5/3.x apply implicit caching to a
+repeated prompt prefix automatically, and our stable system prefix is sent
+unchanged each turn, so it benefits without an explicit CachedContent resource.
 """
 
 from __future__ import annotations

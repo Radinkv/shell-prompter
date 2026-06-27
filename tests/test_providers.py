@@ -148,6 +148,18 @@ def test_anthropic_disable_tools_sets_choice():
     assert client.last_kwargs["tool_choice"] == {"type": "none"}
 
 
+@pytest.mark.parametrize("system_texts, cached_index", [
+    (["stable", "volatile-env"], 0),            # concise off: cache the base prompt
+    (["base", "concise", "volatile-env"], 1),   # concise on: cache through concise
+])
+def test_anthropic_caches_stable_system_prefix(system_texts, cached_index):
+    request = ap.AnthropicProvider(None, "m").build_request(
+        [], system_texts, disable_tools=False)
+    system = request["system"]
+    assert system[cached_index]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in system[-1]   # volatile env block re-sent fresh
+
+
 class _RaisingClient:
     def __init__(self, error):
         self._error = error
