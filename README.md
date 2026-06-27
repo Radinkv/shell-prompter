@@ -11,6 +11,8 @@ endpoint such as Groq or OpenRouter), or Gemini.
 ```
 $ prompter "make a folder called scratch, cd into it, then run claude"
 $ prompter "download uv if it isn't installed, then print its version"
+$ prompter "write a C++ linked list, compile it with clang++, and run it"
+$ prompter "make a venv in ~/Documents/ml, install scikit-learn, open it in VS Code"
 $ prompter
 ```
 
