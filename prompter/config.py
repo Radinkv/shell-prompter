@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version as _distribution_version
+from pathlib import Path
 
 from .colors import palette
 from .constants import EMPTY, FILE_WRITE_MODE, JSON_INDENT
@@ -36,6 +38,27 @@ def program_version() -> str:
         return _distribution_version(DISTRIBUTION_NAME)
     except PackageNotFoundError:
         return _UNKNOWN_VERSION
+
+
+_PYPROJECT_NAME = "pyproject.toml"
+_PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
+
+
+def source_version() -> str | None:
+    """The version declared in a sibling pyproject.toml, or None.
+
+    Only a source checkout has pyproject.toml next to the package; an installed
+    wheel does not ship it. So a non-None result that differs from
+    program_version() means the editable install's metadata is stale -- the dev
+    bumped the version but has not reinstalled. End users never hit this path.
+    """
+    pyproject = Path(__file__).resolve().parent.parent / _PYPROJECT_NAME
+    try:
+        text = pyproject.read_text()
+    except OSError:
+        return None
+    match = _PYPROJECT_VERSION_RE.search(text)
+    return match.group(1) if match else None
 
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_OPENAI = "openai"

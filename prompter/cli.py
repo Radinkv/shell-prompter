@@ -26,6 +26,7 @@ from .config import (
     normalize_provider,
     program_version,
     save_config,
+    source_version,
 )
 from .completion import (
     CommandSurface,
@@ -59,6 +60,10 @@ _CMD_VERSION = "version"
 _HELP_FLAGS = ("-h", "--help")
 _VERSION_FLAGS = ("-V", "--version")
 _VERSION_LINE = "{program} {version}"
+_VERSION_DRIFT = (
+    "note: pyproject.toml declares {source}, but the installed package is "
+    "{installed}. Run `pip install -e .` to refresh."
+)
 
 _KEYS_LIST = "list"
 _KEYS_ADD = "add"
@@ -464,7 +469,11 @@ def cmd_help(console: Console) -> int:
 
 
 def cmd_version(console: Console) -> int:
-    console.info(_VERSION_LINE.format(program=PROGRAM_NAME, version=program_version()))
+    installed = program_version()
+    console.info(_VERSION_LINE.format(program=PROGRAM_NAME, version=installed))
+    source = source_version()
+    if source is not None and source != installed:
+        console.note(_VERSION_DRIFT.format(source=source, installed=installed))
     return OK_EXIT_CODE
 
 

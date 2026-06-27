@@ -295,6 +295,31 @@ def test_main_version_forms(argv, capsys):
     assert program_version() in capsys.readouterr().out
 
 
+def test_version_warns_when_source_ahead_of_install(monkeypatch):
+    monkeypatch.setattr(cli, "program_version", lambda: "0.2.0")
+    monkeypatch.setattr(cli, "source_version", lambda: "0.3.0")
+    console = MagicMock(spec=Console)
+    cli.cmd_version(console)
+    console.note.assert_called_once()
+    assert "0.3.0" in console.note.call_args[0][0]
+
+
+def test_version_quiet_when_in_sync(monkeypatch):
+    monkeypatch.setattr(cli, "program_version", lambda: "0.2.0")
+    monkeypatch.setattr(cli, "source_version", lambda: "0.2.0")
+    console = MagicMock(spec=Console)
+    cli.cmd_version(console)
+    console.note.assert_not_called()
+
+
+def test_version_quiet_for_installed_wheel(monkeypatch):
+    """No pyproject beside the package (wheel install) -> never warns."""
+    monkeypatch.setattr(cli, "source_version", lambda: None)
+    console = MagicMock(spec=Console)
+    cli.cmd_version(console)
+    console.note.assert_not_called()
+
+
 def test_main_routes_to_keys(isolated):
     assert cli.main(["keys", "list"]) == cli.OK_EXIT_CODE
 
