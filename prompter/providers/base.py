@@ -115,11 +115,32 @@ class ToolInvocation:
 
 
 @dataclass
+class Usage:
+    """Token counts for one model turn.
+
+    input_tokens is the whole prompt (every provider reports it inclusive of any
+    cached portion); cached_tokens is the part of it served from the prompt cache.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+
+    def __add__(self, other: Usage) -> Usage:
+        return Usage(
+            self.input_tokens + other.input_tokens,
+            self.output_tokens + other.output_tokens,
+            self.cached_tokens + other.cached_tokens,
+        )
+
+
+@dataclass
 class AssistantTurn:
     """One model turn: any text plus any tool calls. No calls means a final turn."""
 
     text: str
     tool_calls: list[ToolInvocation] = field(default_factory=list)
+    usage: Usage | None = None
 
 
 @dataclass
@@ -186,6 +207,7 @@ class TurnCollector:
         self._on_text = on_text
         self._text_parts: list[str] = []
         self._tool_calls: list[ToolInvocation] = []
+        self._usage: Usage | None = None
 
     def add_text(self, text: str | None) -> None:
         if text:
@@ -196,8 +218,12 @@ class TurnCollector:
                       signature: bytes | None = None) -> None:
         self._tool_calls.append(tool_invocation_from_args(call_id, args, signature))
 
+    def set_usage(self, usage: Usage | None) -> None:
+        if usage is not None:
+            self._usage = usage
+
     def finish(self) -> AssistantTurn:
-        return AssistantTurn(EMPTY.join(self._text_parts), self._tool_calls)
+        return AssistantTurn(EMPTY.join(self._text_parts), self._tool_calls, self._usage)
 
 
 class ModelProvider(ABC):

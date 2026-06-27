@@ -127,6 +127,8 @@ class Config:
     max_fix_attempts: int = DEFAULT_MAX_FIX_ATTEMPTS
     auto_approve_safe: bool = True
     concise: bool = False
+    show_usage: bool = False
+    pricing: dict = field(default_factory=dict)
     preferences: list[str] = field(
         default_factory=lambda: list(DEFAULT_PREFERENCES)
     )

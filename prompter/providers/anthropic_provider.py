@@ -26,6 +26,7 @@ from .base import (
     ProviderError,
     TurnCollector,
     ToolResultsMessage,
+    Usage,
     UserMessage,
     register,
 )
@@ -59,6 +60,12 @@ _TOOL_KEY_INPUT_SCHEMA = "input_schema"
 
 _CACHE_CONTROL = "cache_control"
 _CACHE_EPHEMERAL = {"type": "ephemeral"}
+
+_ATTR_USAGE = "usage"
+_ATTR_INPUT_TOKENS = "input_tokens"
+_ATTR_OUTPUT_TOKENS = "output_tokens"
+_ATTR_CACHE_READ = "cache_read_input_tokens"
+_ATTR_CACHE_CREATION = "cache_creation_input_tokens"
 
 _REQ_MODEL = "model"
 _REQ_MAX_TOKENS = "max_tokens"
@@ -96,6 +103,19 @@ def _system_blocks(system_texts: list[str]) -> list[dict]:
     if len(blocks) >= 2:
         blocks[-2][_CACHE_CONTROL] = _CACHE_EPHEMERAL
     return blocks
+
+
+def _usage_from(usage) -> Usage:
+    """Anthropic reports cached and freshly-read input separately; sum them for
+    the full prompt size and keep the cache-read portion."""
+    fresh = getattr(usage, _ATTR_INPUT_TOKENS, 0) or 0
+    cached = getattr(usage, _ATTR_CACHE_READ, 0) or 0
+    created = getattr(usage, _ATTR_CACHE_CREATION, 0) or 0
+    return Usage(
+        input_tokens=fresh + cached + created,
+        output_tokens=getattr(usage, _ATTR_OUTPUT_TOKENS, 0) or 0,
+        cached_tokens=cached,
+    )
 
 
 def _to_messages(history: list[HistoryItem]) -> list[dict]:
@@ -182,6 +202,9 @@ class AnthropicProvider(ModelProvider):
         for block in final.content:
             if block.type == _BLOCK_TOOL_USE:
                 collector.add_tool_call(block.id, block.input or {})
+        usage = getattr(final, _ATTR_USAGE, None)
+        if usage is not None:
+            collector.set_usage(_usage_from(usage))
 
 
 @register(PROVIDER_ANTHROPIC)

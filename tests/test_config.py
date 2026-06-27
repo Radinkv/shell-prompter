@@ -19,11 +19,20 @@ def test_defaults():
     assert cfg.base_url is None
     assert cfg.max_fix_attempts == 3
     assert cfg.concise is False
+    assert cfg.show_usage is False
+    assert cfg.pricing == {}
 
 
 def test_concise_round_trips():
     restored = Config.from_dict(Config(concise=True).to_dict())
     assert restored.concise is True
+
+
+def test_usage_and_pricing_round_trip():
+    original = Config(show_usage=True, pricing={"m": {"input": 3.0, "output": 15.0}})
+    restored = Config.from_dict(original.to_dict())
+    assert restored.show_usage is True
+    assert restored.pricing == {"m": {"input": 3.0, "output": 15.0}}
 
 
 @pytest.mark.parametrize("provider, model", [

@@ -36,6 +36,7 @@ from .base import (
     ProviderError,
     TurnCollector,
     ToolResultsMessage,
+    Usage,
     UserMessage,
     fallback_call_id,
     import_optional,
@@ -61,6 +62,11 @@ _ATTR_THOUGHT_SIGNATURE = "thought_signature"
 _ATTR_CODE = "code"
 _ATTR_STATUS_CODE = "status_code"
 _ATTR_ID = "id"
+
+_ATTR_USAGE_METADATA = "usage_metadata"
+_ATTR_PROMPT_TOKEN_COUNT = "prompt_token_count"
+_ATTR_CANDIDATES_TOKEN_COUNT = "candidates_token_count"
+_ATTR_CACHED_TOKEN_COUNT = "cached_content_token_count"
 
 _REQ_CONTENTS = "contents"
 _REQ_CONFIG = "config"
@@ -114,6 +120,19 @@ def _chunk_calls(chunk) -> list:
     return [(call, None) for call in getattr(chunk, _ATTR_FUNCTION_CALLS, None) or []]
 
 
+def _chunk_usage(chunk) -> Usage | None:
+    """The cumulative usage_metadata rides on the streamed chunks (the final one
+    carries the totals); absent on chunks that don't report it."""
+    metadata = getattr(chunk, _ATTR_USAGE_METADATA, None)
+    if metadata is None:
+        return None
+    return Usage(
+        input_tokens=getattr(metadata, _ATTR_PROMPT_TOKEN_COUNT, 0) or 0,
+        output_tokens=getattr(metadata, _ATTR_CANDIDATES_TOKEN_COUNT, 0) or 0,
+        cached_tokens=getattr(metadata, _ATTR_CACHED_TOKEN_COUNT, 0) or 0,
+    )
+
+
 def _is_auth_error(error) -> bool:
     code = getattr(error, _ATTR_CODE, None) or getattr(error, _ATTR_STATUS_CODE, None)
     if code in _AUTH_STATUS_CODES:
@@ -156,6 +175,7 @@ class GeminiProvider(ModelProvider):
                     call_id = getattr(call, _ATTR_ID, None) or fallback_call_id(index)
                     collector.add_tool_call(
                         call_id, dict(call.args or {}), signature=signature)
+                collector.set_usage(_chunk_usage(chunk))
         except self._errors.APIError as e:
             if _is_auth_error(e):
                 raise ProviderAuthError(str(e)) from e

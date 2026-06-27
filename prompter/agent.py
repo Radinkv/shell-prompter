@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import ApprovalMode, Config
+from .cost import estimate as estimate_cost
 from .history import compact
 from .prompts import build_system_texts
 from .providers.base import (
@@ -20,6 +21,7 @@ from .providers.base import (
     ToolInvocation,
     ToolResult,
     ToolResultsMessage,
+    Usage,
     UserMessage,
 )
 from .risk import RiskAssessment, RiskTier, classify
@@ -103,14 +105,25 @@ class Agent:
         self._approve_all = False
         self.consecutive_failures = 0
         self._force_stop = False
+        self._run_usage = Usage()
 
     def run_turn(self, user_text: str) -> None:
         self.consecutive_failures = 0
         self._force_stop = False
+        self._run_usage = Usage()
         self.conversation.add_user(user_text)
         another_round = True
         while another_round:
             another_round = self._run_round()
+        self._report_usage()
+
+    def _report_usage(self) -> None:
+        if not self.config.show_usage:
+            return
+        usage = self._run_usage
+        cost = estimate_cost(self.config.resolved_model, usage, self.config.pricing)
+        self.console.usage(
+            usage.input_tokens, usage.output_tokens, usage.cached_tokens, cost)
 
     def _run_round(self) -> bool:
         """Run one model turn and return whether another round is needed."""
@@ -133,6 +146,8 @@ class Agent:
             self.console.stream_text,
         )
         self.console.end_stream()
+        if turn.usage is not None:
+            self._run_usage = self._run_usage + turn.usage
         return turn
 
     def _process_tool_calls(self, tool_calls: list[ToolInvocation]) -> list[ToolResult]:

@@ -70,6 +70,12 @@ def test_verbose_flag_overrides_config_concise():
     assert cfg.concise is False
 
 
+def test_usage_flag_enables():
+    cfg = Config()
+    cli._apply_overrides(parse(["--usage"]), cfg)
+    assert cfg.show_usage is True
+
+
 @pytest.mark.parametrize("given, expected", [
     ("Gemini", "gemini"), ("OPENAI", "openai"), ("claude", "anthropic"),
     ("gpt", "openai"), ("google", "gemini"),

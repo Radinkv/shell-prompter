@@ -91,3 +91,17 @@ def test_end_stream_without_text_is_silent(console, capsys):
     console.begin_stream()
     console.end_stream()
     assert capsys.readouterr().out == ""
+
+
+def test_usage_line_with_cost(console, capsys):
+    console.usage(1240, 380, 766, cost=0.004)
+    out = capsys.readouterr().out
+    assert "1,240 in" in out
+    assert "380 out" in out
+    assert "766 cached" in out
+    assert "est $0.0040" in out
+
+
+def test_usage_line_without_cost(console, capsys):
+    console.usage(10, 5, 0)
+    assert "est $" not in capsys.readouterr().out

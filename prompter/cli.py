@@ -82,6 +82,7 @@ _FLAG_ASK_ALL = "--ask-all"
 _FLAG_YOLO = "--yolo"
 _FLAG_CONCISE = "--concise"
 _FLAG_VERBOSE = "--verbose"
+_FLAG_USAGE = "--usage"
 _ACTION_STORE_TRUE = "store_true"
 
 _LABEL_ADD_IT = "add it"
@@ -169,6 +170,7 @@ Run flags (modify one run):
   --yolo                            run everything with no confirmation
   --concise                         no code comments, minimal explanation
   --verbose                         full comments and explanation (overrides config)
+  --usage                           print token usage (and cost if priced) per run
 
 Manage:
   prompter keys add <provider> <key>    store an API key
@@ -267,6 +269,7 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument(_FLAG_YOLO, action=_ACTION_STORE_TRUE)
     parser.add_argument(_FLAG_CONCISE, action=_ACTION_STORE_TRUE)
     parser.add_argument(_FLAG_VERBOSE, action=_ACTION_STORE_TRUE)
+    parser.add_argument(_FLAG_USAGE, action=_ACTION_STORE_TRUE)
     return parser
 
 
@@ -298,6 +301,8 @@ def _apply_overrides(args, config: Config) -> None:
         config.concise = True
     if args.verbose:
         config.concise = False
+    if args.usage:
+        config.show_usage = True
     pinned = config.model if config_provider == config.provider else EMPTY
     config.model = args.model or pinned or default_model_for(config.provider)
 

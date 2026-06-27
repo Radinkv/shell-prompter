@@ -12,7 +12,7 @@ from prompter.providers.base import (
     ToolResultsMessage,
     UserMessage,
 )
-from prompter.providers.base import ToolResult
+from prompter.providers.base import AssistantTurn, ToolResult, Usage
 from prompter.risk import RiskTier
 from prompter.shell import CommandResult
 from prompter.ui import Decision
@@ -184,3 +184,21 @@ def test_complete_sends_compacted_history(mock_console):
 
     assert _ELISION in provider.seen[0].results[0].content   # model gets slimmed copy
     assert agent.conversation.history[0].results[0].content == big  # record untouched
+
+
+def test_usage_accumulates_and_reports_when_enabled(mock_console):
+    provider = FakeProvider([
+        AssistantTurn("", [make_call("ls")], Usage(100, 20, 0)),
+        AssistantTurn("done", [], Usage(50, 10, 30)),
+    ])
+    agent = _agent(provider, FakeShell(), mock_console, config=Config(show_usage=True))
+    agent.run_turn("list files")
+    # 100+50 in, 20+10 out, 0+30 cached; no pricing configured -> no cost.
+    mock_console.usage.assert_called_once_with(150, 30, 30, None)
+
+
+def test_usage_not_reported_when_disabled(mock_console):
+    provider = FakeProvider([AssistantTurn("done", [], Usage(100, 20, 0))])
+    agent = _agent(provider, FakeShell(), mock_console)  # show_usage defaults False
+    agent.run_turn("hi")
+    mock_console.usage.assert_not_called()

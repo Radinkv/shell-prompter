@@ -35,6 +35,7 @@ from .base import (
     ProviderError,
     TurnCollector,
     ToolResultsMessage,
+    Usage,
     UserMessage,
     fallback_call_id,
     import_optional,
@@ -68,7 +69,15 @@ _SLOT_ARGS = "args"
 _REQ_MODEL = "model"
 _REQ_MESSAGES = "messages"
 _REQ_STREAM = "stream"
+_REQ_STREAM_OPTIONS = "stream_options"
 _REQ_TOOLS = "tools"
+_INCLUDE_USAGE = {"include_usage": True}
+
+_ATTR_USAGE = "usage"
+_ATTR_PROMPT_TOKENS = "prompt_tokens"
+_ATTR_COMPLETION_TOKENS = "completion_tokens"
+_ATTR_PROMPT_DETAILS = "prompt_tokens_details"
+_ATTR_CACHED_TOKENS = "cached_tokens"
 
 _MODULE_OPENAI = "openai"
 _KW_API_KEY = "api_key"
@@ -122,6 +131,18 @@ def _assistant_message(item: AssistantMessage) -> dict:
     return message
 
 
+def _usage_from(usage) -> Usage:
+    """prompt_tokens already includes any cached prefix; cached_tokens is its
+    cache-served portion (nested under prompt_tokens_details)."""
+    details = getattr(usage, _ATTR_PROMPT_DETAILS, None)
+    cached = getattr(details, _ATTR_CACHED_TOKENS, 0) or 0 if details else 0
+    return Usage(
+        input_tokens=getattr(usage, _ATTR_PROMPT_TOKENS, 0) or 0,
+        output_tokens=getattr(usage, _ATTR_COMPLETION_TOKENS, 0) or 0,
+        cached_tokens=cached,
+    )
+
+
 def _parse_args(raw: str) -> dict:
     try:
         return json.loads(raw) if raw else {}
@@ -153,6 +174,7 @@ class OpenAIProvider(ModelProvider):
             _REQ_MODEL: self.model,
             _REQ_MESSAGES: _to_messages(system_texts, history),
             _REQ_STREAM: True,
+            _REQ_STREAM_OPTIONS: _INCLUDE_USAGE,
         }
         if not disable_tools:
             request[_REQ_TOOLS] = [_FUNCTION_TOOL]
@@ -161,6 +183,9 @@ class OpenAIProvider(ModelProvider):
     def run_stream(self, request, collector: TurnCollector) -> None:
         accumulated: dict[int, dict] = {}
         for chunk in self._client.chat.completions.create(**request):
+            usage = getattr(chunk, _ATTR_USAGE, None)
+            if usage is not None:
+                collector.set_usage(_usage_from(usage))
             choices = getattr(chunk, _RESP_CHOICES, None) or []
             if not choices:
                 continue

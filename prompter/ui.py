@@ -76,6 +76,11 @@ _KEY_ROW = "  {provider} {color}{status}{reset}"
 _REPL_INTRO_LINE = "{dim}{intro}{reset}"
 _REPL_PROMPT_LINE = "\n{magenta}{program}{reset} {dim}{cwd}{reset} {arrow} "
 
+_USAGE_LINE = (
+    "  {dim}~ {input:,} in · {output:,} out · {cached:,} cached{cost}{reset}"
+)
+_USAGE_COST = " · est ${cost:.4f}"
+
 
 class Decision(Enum):
     RUN = "run"
@@ -244,6 +249,13 @@ class Console:
         color = c.GREEN if present else c.DIM
         print(_KEY_ROW.format(provider=provider.ljust(_PROVIDER_WIDTH), color=color,
                               status=status, reset=c.RESET))
+
+    def usage(self, input_tokens: int, output_tokens: int, cached_tokens: int,
+              cost: float | None = None) -> None:
+        cost_text = _USAGE_COST.format(cost=cost) if cost is not None else EMPTY
+        print(_USAGE_LINE.format(
+            dim=self.c.DIM, input=input_tokens, output=output_tokens,
+            cached=cached_tokens, cost=cost_text, reset=self.c.RESET))
 
     def repl_intro(self, cwd: str) -> None:
         intro = _REPL_INTRO_TEMPLATE.format(cwd=cwd)

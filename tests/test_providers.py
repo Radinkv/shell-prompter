@@ -378,3 +378,42 @@ def test_gemini_complete_round_trip():
     assert turn.text == "hi"
     assert turn.tool_calls[0].call_id == "g1"
     assert turn.tool_calls[0].command == "ls"
+
+
+def test_anthropic_captures_usage():
+    final = _ns(
+        content=[_ns(type="text", text="ok")],
+        usage=_ns(input_tokens=10, output_tokens=5,
+                  cache_read_input_tokens=4, cache_creation_input_tokens=2),
+    )
+    provider = ap.AnthropicProvider(_AnthropicClient([], final), "m")
+    turn = provider.complete([], ["sys"], False, lambda _t: None)
+    assert turn.usage.input_tokens == 16   # 10 fresh + 4 read + 2 created
+    assert turn.usage.output_tokens == 5
+    assert turn.usage.cached_tokens == 4
+
+
+def test_openai_captures_usage():
+    chunks = [
+        _openai_chunk(content="hi"),
+        _ns(choices=[], usage=_ns(prompt_tokens=20, completion_tokens=8,
+                                  prompt_tokens_details=_ns(cached_tokens=6))),
+    ]
+    provider = op.OpenAIProvider(_FakeOpenAIErrors, _OpenAIClient(chunks), "m")
+    turn = provider.complete([UserMessage("go")], ["sys"], False, lambda _t: None)
+    assert turn.usage.input_tokens == 20
+    assert turn.usage.output_tokens == 8
+    assert turn.usage.cached_tokens == 6
+    assert provider._client.last_params["stream_options"] == {"include_usage": True}
+
+
+def test_gemini_captures_usage():
+    chunks = [_ns(text="hi", function_calls=None, candidates=None,
+                  usage_metadata=_ns(prompt_token_count=30, candidates_token_count=12,
+                                     cached_content_token_count=9))]
+    provider = gp.GeminiProvider(
+        _FakeGenaiErrors, _fake_genai_types(), _GeminiClient(chunks), "m")
+    turn = provider.complete([UserMessage("go")], ["sys"], False, lambda _t: None)
+    assert turn.usage.input_tokens == 30
+    assert turn.usage.output_tokens == 12
+    assert turn.usage.cached_tokens == 9
