@@ -182,7 +182,13 @@ def _value_flag_cases(shell: str, surface: CommandSurface) -> str:
 
 
 def render(shell: str, surface: CommandSurface) -> str:
-    """Return the completion script for ``shell`` (one of SUPPORTED_SHELLS)."""
+    """Return the completion script for ``shell`` (one of SUPPORTED_SHELLS).
+
+    The surface's commands, flags, and provider names are interpolated into the
+    script unquoted. They are code-defined identifiers (dispatch keys, argparse
+    flag strings, registry names), never external input, so they are assumed
+    shell-safe -- keep them that way (plain ``[\\w-]`` tokens) if you add any.
+    """
     template = _ZSH_TEMPLATE if shell == ZSH else _BASH_TEMPLATE
     return template.format(
         program=PROGRAM_NAME,

@@ -33,10 +33,22 @@ def test_old_large_success_is_collapsed():
     history = [_results(_big()), _results("recent"), _results("recent")]
     out = compact(history, keep_recent=2)
     collapsed = out[0].results[0].content
-    assert _ELISION in collapsed
-    assert collapsed.startswith("exit_code: 0")     # exit-code-first header kept
-    assert "Successfully installed x" in collapsed   # final line kept
-    assert "line 100" not in collapsed               # bulk dropped
+    assert collapsed == "exit_code: 0\n" + _ELISION  # header kept, body elided
+    assert "line 100" not in collapsed
+    assert "Successfully installed x" not in collapsed
+
+
+def test_collapse_on_real_payload_shape():
+    """The agent's payload ends with a (often empty) stderr section, so the
+    collapse must not depend on the last line being meaningful."""
+    from prompter.agent import _PAYLOAD_TEMPLATE
+    stdout = "\n".join(["Collecting pkg"] * 60 + ["Successfully installed pkg"])
+    payload = _PAYLOAD_TEMPLATE.format(exit_code=0, cwd="/x", stdout=stdout, stderr="")
+    out = compact([_results(payload), _results("a"), _results("b")], keep_recent=2)
+    collapsed = out[0].results[0].content
+    assert collapsed == "exit_code: 0\n" + _ELISION
+    assert len(collapsed) < len(payload)             # actually shrank
+    assert "stderr:" not in collapsed                # no useless trailing label
 
 
 def test_old_failure_kept_verbatim():

@@ -41,11 +41,23 @@ def program_version() -> str:
 
 
 _PYPROJECT_NAME = "pyproject.toml"
+_PROJECT_HEADER_RE = re.compile(r"^\[project\]\s*$", re.MULTILINE)
+_TABLE_HEADER_RE = re.compile(r"^\[", re.MULTILINE)
 _PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
 
 
+def _version_from_pyproject(text: str) -> str | None:
+    section = _PROJECT_HEADER_RE.search(text)
+    if section is None:
+        return None
+    next_header = _TABLE_HEADER_RE.search(text, section.end())
+    project_body = text[section.end():next_header.start()] if next_header else text[section.end():]
+    match = _PYPROJECT_VERSION_RE.search(project_body)
+    return match.group(1) if match else None
+
+
 def source_version() -> str | None:
-    """The version declared in a sibling pyproject.toml, or None.
+    """The version declared in a sibling pyproject.toml's [project] table, or None.
 
     Only a source checkout has pyproject.toml next to the package; an installed
     wheel does not ship it. So a non-None result that differs from
@@ -57,8 +69,7 @@ def source_version() -> str | None:
         text = pyproject.read_text()
     except OSError:
         return None
-    match = _PYPROJECT_VERSION_RE.search(text)
-    return match.group(1) if match else None
+    return _version_from_pyproject(text)
 
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_OPENAI = "openai"

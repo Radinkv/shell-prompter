@@ -236,7 +236,9 @@ class TurnCollector:
 
 _ATTR_STATUS_CODE = "status_code"
 _ATTR_ERROR_CODE = "code"
-RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+# Request timeout, rate limit, and server errors -- the codes that are actually
+# safe to replay. Not 409/425, which signal client-side state, not a blip.
+RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
 
 
 class ModelProvider(ABC):
@@ -255,7 +257,9 @@ class ModelProvider(ABC):
             return True
         code = (getattr(error, _ATTR_STATUS_CODE, None)
                 or getattr(error, _ATTR_ERROR_CODE, None))
-        return code in RETRYABLE_STATUS_CODES
+        # .code can be a string app-code on some SDKs; only an int HTTP status
+        # is meaningful here.
+        return isinstance(code, int) and code in RETRYABLE_STATUS_CODES
 
     def complete(
         self,

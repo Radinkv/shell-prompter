@@ -169,7 +169,7 @@ Run flags (modify one run):
   --ask-all                         confirm every command
   --yolo                            run everything with no confirmation
   --concise                         no code comments, minimal explanation
-  --verbose                         full comments and explanation (overrides config)
+  --verbose                         full comments and explanation (overrides --concise/config)
   --usage                           print token usage (and cost if priced) per run
 
 Manage:
@@ -299,7 +299,7 @@ def _apply_overrides(args, config: Config) -> None:
         config.max_fix_attempts = args.max_fix
     if args.concise:
         config.concise = True
-    if args.verbose:
+    if args.verbose:        # an explicit --verbose wins over --concise and config
         config.concise = False
     if args.usage:
         config.show_usage = True

@@ -35,6 +35,14 @@ def test_usage_and_pricing_round_trip():
     assert restored.pricing == {"m": {"input": 3.0, "output": 15.0}}
 
 
+def test_source_version_scoped_to_project_table():
+    from prompter.config import _version_from_pyproject
+    # a version= in an earlier table must be ignored
+    text = '[tool.poetry]\nversion = "9.9.9"\n\n[project]\nname = "x"\nversion = "1.2.3"\n'
+    assert _version_from_pyproject(text) == "1.2.3"
+    assert _version_from_pyproject("[build-system]\nrequires = []\n") is None
+
+
 @pytest.mark.parametrize("provider, model", [
     ("anthropic", "claude-sonnet-4-6"),
     ("openai", "gpt-5.4"),

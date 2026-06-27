@@ -43,6 +43,19 @@ from prompter.risk import RISK_REGISTRY, RiskTier, classify
     ("echo hi > /dev/null", RiskTier.SAFE),
     # a real file write still confirms
     ("echo hi > out.txt", RiskTier.CONFIRM),
+    # mass deletion via find -delete / -exec rm (previously auto-ran)
+    ("find . -name '*.log' -delete", RiskTier.DANGER),
+    ("find /tmp -exec rm {} +", RiskTier.DANGER),
+    # piping into a shell from any source, not just curl (previously auto-ran)
+    ("cat script.sh | bash", RiskTier.DANGER),
+    ("echo ZXZpbAo= | base64 -d | bash", RiskTier.DANGER),
+    # recursive perms with reversed/long flags (previously auto-ran)
+    ("chmod 777 -R /etc", RiskTier.DANGER),
+    ("chown --recursive root /etc", RiskTier.DANGER),
+    # recursive/forced delete with long flags
+    ("rm --recursive --force build", RiskTier.DANGER),
+    # writing a file via tee
+    ("echo data | tee /etc/hosts", RiskTier.CONFIRM),
 ])
 def test_classify_tier(command, tier):
     assert classify(command).tier is tier

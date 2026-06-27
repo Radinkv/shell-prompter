@@ -374,6 +374,14 @@ def test_gemini_is_auth_error():
     assert gp._is_auth_error(Exception("server boom")) is False
 
 
+def test_gemini_auth_error_trusts_status_over_message():
+    class _Err(Exception):
+        code = 400
+
+    # A non-auth 400 that merely mentions an api key must not be called auth.
+    assert gp._is_auth_error(_Err("missing api key for request")) is False
+
+
 def test_gemini_to_contents():
     provider = gp.GeminiProvider(_FakeGenaiErrors, _fake_genai_types(), None, "m")
     contents = provider._to_contents([
@@ -436,13 +444,32 @@ def test_openai_captures_usage():
 def test_gemini_captures_usage():
     chunks = [_ns(text="hi", function_calls=None, candidates=None,
                   usage_metadata=_ns(prompt_token_count=30, candidates_token_count=12,
-                                     cached_content_token_count=9))]
+                                     thoughts_token_count=7, cached_content_token_count=9))]
     provider = gp.GeminiProvider(
         _FakeGenaiErrors, _fake_genai_types(), _GeminiClient(chunks), "m")
     turn = provider.complete([UserMessage("go")], ["sys"], False, lambda _t: None)
     assert turn.usage.input_tokens == 30
-    assert turn.usage.output_tokens == 12
+    assert turn.usage.output_tokens == 19   # 12 answer + 7 thinking tokens
     assert turn.usage.cached_tokens == 9
+
+
+def test_gemini_network_error_wrapped_retryable():
+    import httpx
+
+    class _RaisingGemini:
+        def __init__(self, error):
+            self._error = error
+            self.models = _ns(generate_content_stream=self._stream)
+
+        def _stream(self, model, contents, config):
+            raise self._error
+
+    provider = gp.GeminiProvider(
+        _FakeGenaiErrors, _fake_genai_types(),
+        _RaisingGemini(httpx.ConnectError("connection dropped")), "m")
+    with pytest.raises(base.ProviderError) as exc:
+        provider.complete([UserMessage("go")], ["sys"], False, lambda _t: None)
+    assert exc.value.retryable is True
 
 
 class _BoomTransient(Exception):

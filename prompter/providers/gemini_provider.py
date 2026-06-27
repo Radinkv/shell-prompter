@@ -16,6 +16,8 @@ unchanged each turn, so it benefits without an explicit CachedContent resource.
 
 from __future__ import annotations
 
+import httpx
+
 from ..config import PROVIDER_GEMINI, Config
 from ..constants import EMPTY
 from ..keys import resolve_api_key
@@ -68,6 +70,7 @@ _ATTR_ID = "id"
 _ATTR_USAGE_METADATA = "usage_metadata"
 _ATTR_PROMPT_TOKEN_COUNT = "prompt_token_count"
 _ATTR_CANDIDATES_TOKEN_COUNT = "candidates_token_count"
+_ATTR_THOUGHTS_TOKEN_COUNT = "thoughts_token_count"
 _ATTR_CACHED_TOKEN_COUNT = "cached_content_token_count"
 
 _REQ_CONTENTS = "contents"
@@ -145,9 +148,11 @@ def _chunk_usage(chunk) -> Usage | None:
     metadata = getattr(chunk, _ATTR_USAGE_METADATA, None)
     if metadata is None:
         return None
+    answer = getattr(metadata, _ATTR_CANDIDATES_TOKEN_COUNT, 0) or 0
+    thoughts = getattr(metadata, _ATTR_THOUGHTS_TOKEN_COUNT, 0) or 0
     return Usage(
         input_tokens=getattr(metadata, _ATTR_PROMPT_TOKEN_COUNT, 0) or 0,
-        output_tokens=getattr(metadata, _ATTR_CANDIDATES_TOKEN_COUNT, 0) or 0,
+        output_tokens=answer + thoughts,   # thinking models bill thoughts as output
         cached_tokens=getattr(metadata, _ATTR_CACHED_TOKEN_COUNT, 0) or 0,
     )
 
@@ -199,6 +204,8 @@ class GeminiProvider(ModelProvider):
             if _is_auth_error(e):
                 raise ProviderAuthError(str(e)) from e
             raise ProviderError(str(e), retryable=self.is_transient(e)) from e
+        except httpx.TransportError as e:
+            raise ProviderError(str(e), retryable=True) from e
 
     def _to_contents(self, history: list[HistoryItem]) -> list:
         types = self._types

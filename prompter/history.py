@@ -3,8 +3,9 @@
 A multi-step task resends the whole conversation on every turn, so old command
 outputs pile up as input tokens. compact() keeps the goal, the most recent tool
 results, and any failures verbatim, and collapses older *successful* outputs to
-a short status line -- the exit-code header plus the final line, which is where
-the signal usually is ("Successfully installed ..."), with the bulk elided.
+their first line (the exit-code header) with the body elided. The model
+already reacted to the full output when the command ran; a later turn only needs
+to know the step succeeded.
 
 It is a pure transform applied just before a provider call. The stored
 conversation is never mutated, so nothing is lost from the program's own record;
@@ -53,8 +54,12 @@ def _collapse_result(result: ToolResult) -> ToolResult:
 
 
 def _shorten(content: str) -> str:
-    """Keep the first line (the exit-code header) and the last non-empty line."""
-    lines = [line for line in content.splitlines() if line.strip()]
-    if len(lines) <= 2:
-        return content
-    return NEWLINE.join((lines[0], _ELISION, lines[-1]))
+    """Keep the first line (the exit-code header) and elide the rest.
+
+    A single-line payload (no header/body split) has no body to elide, so cap it
+    by character budget instead of growing it with a marker.
+    """
+    head, separator, _body = content.partition(NEWLINE)
+    if not separator:
+        return content[:COLLAPSE_THRESHOLD]
+    return head + NEWLINE + _ELISION
