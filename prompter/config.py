@@ -16,11 +16,26 @@ import os
 import sys
 from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
+from importlib.metadata import PackageNotFoundError, version as _distribution_version
 
 from .colors import palette
 from .constants import EMPTY, FILE_WRITE_MODE, JSON_INDENT
 
 PROGRAM_NAME = "prompter"
+DISTRIBUTION_NAME = "shell-prompter"
+_UNKNOWN_VERSION = "0.0.0+unknown"
+
+
+def program_version() -> str:
+    """The installed package version, read from distribution metadata.
+
+    Single source of truth is pyproject.toml; the metadata carries it into the
+    built package. Falls back when running from a tree that was never installed.
+    """
+    try:
+        return _distribution_version(DISTRIBUTION_NAME)
+    except PackageNotFoundError:
+        return _UNKNOWN_VERSION
 
 PROVIDER_ANTHROPIC = "anthropic"
 PROVIDER_OPENAI = "openai"

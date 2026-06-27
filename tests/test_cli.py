@@ -280,6 +280,21 @@ def test_main_routes_to_completions(capsys):
     assert "#compdef prompter" in capsys.readouterr().out
 
 
+def test_version_reports_installed_version():
+    from prompter.config import program_version
+    console = MagicMock(spec=Console)
+    assert cli.cmd_version(console) == cli.OK_EXIT_CODE
+    printed = console.info.call_args[0][0]
+    assert printed == f"prompter {program_version()}"
+
+
+@pytest.mark.parametrize("argv", [["version"], ["--version"], ["-V"]])
+def test_main_version_forms(argv, capsys):
+    from prompter.config import program_version
+    assert cli.main(argv) == cli.OK_EXIT_CODE
+    assert program_version() in capsys.readouterr().out
+
+
 def test_main_routes_to_keys(isolated):
     assert cli.main(["keys", "list"]) == cli.OK_EXIT_CODE
 

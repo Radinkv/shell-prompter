@@ -24,6 +24,7 @@ from .config import (
     default_model_for,
     load_config,
     normalize_provider,
+    program_version,
     save_config,
 )
 from .completion import (
@@ -54,7 +55,10 @@ _CMD_CONFIG = "config"
 _CMD_RUN = "run"
 _CMD_HELP = "help"
 _CMD_COMPLETIONS = "completions"
+_CMD_VERSION = "version"
 _HELP_FLAGS = ("-h", "--help")
+_VERSION_FLAGS = ("-V", "--version")
+_VERSION_LINE = "{program} {version}"
 
 _KEYS_LIST = "list"
 _KEYS_ADD = "add"
@@ -165,6 +169,7 @@ Manage:
   prompter status                       show the current setup
   prompter config                       print the config file path
   prompter completions <shell>          print a tab-completion script (zsh, bash)
+  prompter version                      print the installed version
   prompter help                         show this help
 
 Providers: anthropic, openai, gemini
@@ -458,6 +463,11 @@ def cmd_help(console: Console) -> int:
     return OK_EXIT_CODE
 
 
+def cmd_version(console: Console) -> int:
+    console.info(_VERSION_LINE.format(program=PROGRAM_NAME, version=program_version()))
+    return OK_EXIT_CODE
+
+
 _COMMANDS = {
     _CMD_KEYS: cmd_keys,
     _CMD_USE: cmd_use,
@@ -499,6 +509,8 @@ def main(argv: list[str] | None = None) -> int:
     head = argv[0]
     if head in _HELP_FLAGS or head == _CMD_HELP:
         return cmd_help(console)
+    if head in _VERSION_FLAGS or head == _CMD_VERSION:
+        return cmd_version(console)
     if head == _CMD_RUN:
         return cmd_run(argv[1:], console)
     handler = _COMMANDS.get(head)

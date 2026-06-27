@@ -16,6 +16,7 @@ the tools it knows how to launch.
 from __future__ import annotations
 
 from .cli import main
+from .config import program_version
 
 __all__ = ["main"]
-__version__ = "0.1.0"
+__version__ = program_version()

@@ -207,6 +207,7 @@ opens a prompt.
 | `prompter status` | Show the current provider, model, workspace, and keys. |
 | `prompter config` | Print the config file path. |
 | `prompter completions <shell>` | Print a tab-completion script (zsh, bash). See [Tab completion](#tab-completion). |
+| `prompter version` | Print the installed version (also `--version`, `-V`). |
 | `prompter help` | Show usage. |
 
 ## Tab completion
