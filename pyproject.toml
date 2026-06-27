@@ -1,6 +1,6 @@
 [project]
 name = "shell-prompter"
-version = "0.5.0"
+version = "0.6.0"
 description = "A natural-language shell agent powered by Claude, OpenAI, or Gemini."
 readme = "README.md"
 requires-python = ">=3.9"
