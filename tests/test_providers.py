@@ -245,10 +245,12 @@ def test_openai_parse_args_bad_json():
 
 
 class _FakePart:
-    def __init__(self, text=None, function_call=None, function_response=None):
+    def __init__(self, text=None, function_call=None, function_response=None,
+                 thought_signature=None):
         self.text = text
         self.function_call = function_call
         self.function_response = function_response
+        self.thought_signature = thought_signature
 
     @staticmethod
     def from_function_response(name=None, response=None):
@@ -297,11 +299,35 @@ def test_gemini_chunk_text_handles_raise():
     assert gp._chunk_text(_ns(text="hi")) == "hi"
 
 
-def test_gemini_chunk_function_calls_from_candidates():
+def test_gemini_chunk_calls_from_candidates():
     call = _ns(name="run_command", args={"command": "ls"})
-    chunk = _ns(function_calls=None,
-                candidates=[_ns(content=_ns(parts=[_ns(function_call=call)]))])
-    assert gp._chunk_function_calls(chunk) == [call]
+    chunk = _ns(function_calls=None, candidates=[
+        _ns(content=_ns(parts=[_ns(function_call=call, thought_signature=b"sig")]))])
+    assert gp._chunk_calls(chunk) == [(call, b"sig")]
+
+
+def test_gemini_chunk_calls_fallback_accessor_has_no_signature():
+    call = _ns(name="run_command", args={"command": "ls"})
+    chunk = _ns(function_calls=[call], candidates=None)
+    assert gp._chunk_calls(chunk) == [(call, None)]
+
+
+def test_gemini_thought_signature_round_trips():
+    """A thinking model's signature is captured on the way in and replayed on
+    the way out, so the follow-up turn is not rejected with a 400."""
+    call = _ns(name="run_command", id="g1",
+               args={"command": "ls", "explanation": "x", "interactive": False})
+    part = _ns(function_call=call, thought_signature=b"sig-xyz")
+    chunks = [_ns(text=None, function_calls=None,
+                  candidates=[_ns(content=_ns(parts=[part]))])]
+    provider = gp.GeminiProvider(
+        _FakeGenaiErrors, _fake_genai_types(), _GeminiClient(chunks), "gemini-test")
+
+    turn = provider.complete([UserMessage("go")], ["sys"], False, lambda _t: None)
+    assert turn.tool_calls[0].signature == b"sig-xyz"
+
+    contents = provider._to_contents([AssistantMessage("", turn.tool_calls)])
+    assert contents[0].parts[0].thought_signature == b"sig-xyz"
 
 
 def test_gemini_is_auth_error():

@@ -99,12 +99,19 @@ def fallback_call_id(index: object) -> str:
 
 @dataclass
 class ToolInvocation:
-    """A single tool call the model wants to make."""
+    """A single tool call the model wants to make.
+
+    ``signature`` is an opaque, provider-supplied token that must be replayed
+    verbatim when this call is sent back in history. Gemini's thinking models
+    attach a thought signature to each call and reject a follow-up turn that
+    omits it; other providers leave this None.
+    """
 
     call_id: str
     command: str
     explanation: str = EMPTY
     interactive: bool = False
+    signature: bytes | None = None
 
 
 @dataclass
@@ -141,7 +148,9 @@ class ToolResultsMessage:
 HistoryItem = Union[UserMessage, AssistantMessage, ToolResultsMessage]
 
 
-def tool_invocation_from_args(call_id: str, args: dict | None) -> ToolInvocation:
+def tool_invocation_from_args(
+    call_id: str, args: dict | None, signature: bytes | None = None
+) -> ToolInvocation:
     """Build a neutral ToolInvocation from a provider's parsed tool arguments."""
     args = args or {}
     return ToolInvocation(
@@ -149,6 +158,7 @@ def tool_invocation_from_args(call_id: str, args: dict | None) -> ToolInvocation
         command=args.get(PARAM_COMMAND, EMPTY),
         explanation=args.get(PARAM_EXPLANATION, EMPTY),
         interactive=bool(args.get(PARAM_INTERACTIVE, False)),
+        signature=signature,
     )
 
 
@@ -182,8 +192,9 @@ class TurnCollector:
             self._on_text(text)
             self._text_parts.append(text)
 
-    def add_tool_call(self, call_id: str, args: dict | None) -> None:
-        self._tool_calls.append(tool_invocation_from_args(call_id, args))
+    def add_tool_call(self, call_id: str, args: dict | None,
+                      signature: bytes | None = None) -> None:
+        self._tool_calls.append(tool_invocation_from_args(call_id, args, signature))
 
     def finish(self) -> AssistantTurn:
         return AssistantTurn(EMPTY.join(self._text_parts), self._tool_calls)

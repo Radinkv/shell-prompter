@@ -53,6 +53,7 @@ _ATTR_CANDIDATES = "candidates"
 _ATTR_CONTENT = "content"
 _ATTR_PARTS = "parts"
 _ATTR_FUNCTION_CALL = "function_call"
+_ATTR_THOUGHT_SIGNATURE = "thought_signature"
 _ATTR_CODE = "code"
 _ATTR_STATUS_CODE = "status_code"
 _ATTR_ID = "id"
@@ -90,18 +91,23 @@ def _chunk_text(chunk) -> str | None:
         return None
 
 
-def _chunk_function_calls(chunk) -> list:
-    direct = getattr(chunk, _ATTR_FUNCTION_CALLS, None)
-    if direct:
-        return list(direct)
-    calls = []
+def _chunk_calls(chunk) -> list:
+    """Return (function_call, thought_signature) for each call in a chunk.
+
+    The thought signature lives on the Part, and the convenient
+    chunk.function_calls accessor drops it, so walk the parts first and fall back
+    to that accessor (signature-less) only when there are no candidate parts.
+    """
+    pairs = []
     for candidate in getattr(chunk, _ATTR_CANDIDATES, None) or []:
         content = getattr(candidate, _ATTR_CONTENT, None)
         for part in getattr(content, _ATTR_PARTS, None) or []:
             call = getattr(part, _ATTR_FUNCTION_CALL, None)
             if call is not None:
-                calls.append(call)
-    return calls
+                pairs.append((call, getattr(part, _ATTR_THOUGHT_SIGNATURE, None)))
+    if pairs:
+        return pairs
+    return [(call, None) for call in getattr(chunk, _ATTR_FUNCTION_CALLS, None) or []]
 
 
 def _is_auth_error(error) -> bool:
@@ -142,9 +148,10 @@ class GeminiProvider(ModelProvider):
             )
             for chunk in stream:
                 collector.add_text(_chunk_text(chunk))
-                for index, call in enumerate(_chunk_function_calls(chunk)):
+                for index, (call, signature) in enumerate(_chunk_calls(chunk)):
                     call_id = getattr(call, _ATTR_ID, None) or fallback_call_id(index)
-                    collector.add_tool_call(call_id, dict(call.args or {}))
+                    collector.add_tool_call(
+                        call_id, dict(call.args or {}), signature=signature)
         except self._errors.APIError as e:
             if _is_auth_error(e):
                 raise ProviderAuthError(str(e)) from e
@@ -171,14 +178,17 @@ class GeminiProvider(ModelProvider):
         if item.text:
             parts.append(types.Part(text=item.text))
         for call in item.tool_calls:
-            parts.append(types.Part(function_call=types.FunctionCall(
-                name=TOOL_NAME,
-                args={
-                    PARAM_COMMAND: call.command,
-                    PARAM_EXPLANATION: call.explanation,
-                    PARAM_INTERACTIVE: call.interactive,
-                },
-            )))
+            parts.append(types.Part(
+                function_call=types.FunctionCall(
+                    name=TOOL_NAME,
+                    args={
+                        PARAM_COMMAND: call.command,
+                        PARAM_EXPLANATION: call.explanation,
+                        PARAM_INTERACTIVE: call.interactive,
+                    },
+                ),
+                thought_signature=call.signature,
+            ))
         return parts or [types.Part(text=item.text)]
 
     def _result_parts(self, item: ToolResultsMessage) -> list:
