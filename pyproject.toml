@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "radinkv", email = "26397342+Radinkv@users.noreply.github.com" }]
-keywords = ["cli", "shell", "ai", "agent", "llm", "anthropic", "openai", "gemini"]
+keywords = ["cli", "shell", "ai", "agent", "llm", "anthropic", "openai", "gemini", "cohere"]
 classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
@@ -19,6 +19,7 @@ dependencies = [
     "anthropic>=0.40",
     "openai>=1.0",
     "google-genai>=0.3",
+    "cohere>=5.0",
 ]
 
 [project.optional-dependencies]

@@ -8,7 +8,11 @@ import pytest
 
 from prompter import cli
 from prompter.config import ApprovalMode, Config
-from prompter.providers.base import ProviderAuthError, ProviderError
+from prompter.providers.base import (
+    ProviderAuthError,
+    ProviderError,
+    known_providers,
+)
 from prompter.ui import Console
 
 
@@ -214,7 +218,7 @@ def test_keys_add_usage(isolated):
 def test_keys_list(isolated):
     console = MagicMock(spec=Console)
     assert cli.cmd_keys(["list"], console) == cli.OK_EXIT_CODE
-    assert console.key_status.call_count == 3
+    assert console.key_status.call_count == len(known_providers())
 
 
 def test_keys_remove(isolated):
@@ -264,7 +268,7 @@ def test_status(isolated):
     console = MagicMock(spec=Console)
     assert cli.cmd_status([], console) == cli.OK_EXIT_CODE
     assert console.field.call_count == 5
-    assert console.key_status.call_count == 3
+    assert console.key_status.call_count == len(known_providers())
 
 
 def test_config_prints_path(isolated):

@@ -16,10 +16,14 @@ between providers.
 A registry maps a provider name to a factory so config selects the backend with
 one string.
 
+The built-in adapters are Anthropic, OpenAI, Gemini, and Cohere; each registers
+itself under its provider name (see config.PROVIDER_* and DEFAULT_MODELS).
+
 The run_command tool and its JSON-Schema parameters are described once here.
-Anthropic's input_schema and OpenAI's function.parameters are both standard JSON
-Schema, so the parameter shape is defined exactly once and reused. Gemini uses
-its own typed Schema objects and builds them locally. SYSTEM_TEXT_SEPARATOR is
+Anthropic's input_schema, OpenAI's function.parameters, and Cohere's v2
+function.parameters are all standard JSON Schema, so the parameter shape is
+defined exactly once and reused. Gemini uses its own typed Schema objects and
+builds them locally. SYSTEM_TEXT_SEPARATOR is
 how providers that take a single system string join the system texts, and
 fallback_call_id synthesizes a call id when the model did not supply one.
 """

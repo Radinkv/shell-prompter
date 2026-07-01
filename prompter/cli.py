@@ -162,7 +162,7 @@ Run:
   prompter                          interactive chat (REPL)
 
 Run flags (modify one run):
-  --provider NAME                   anthropic, openai, or gemini
+  --provider NAME                   anthropic, openai, gemini, or cohere
   --model ID                        model override
   --base-url URL                    OpenAI-compatible endpoint (Groq, OpenRouter)
   --workspace PATH                  where new projects go
@@ -185,7 +185,7 @@ Manage:
   prompter version                      print the installed version
   prompter help                         show this help
 
-Providers: anthropic, openai, gemini
+Providers: anthropic, openai, gemini, cohere
 """
 
 

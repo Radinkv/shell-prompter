@@ -26,7 +26,8 @@ prompter can launch, not the thing you live inside.
 ## Install
 
 The distribution is `shell-prompter` and it installs one command, `prompter`. A
-single install includes all three providers (Anthropic, OpenAI, and Gemini).
+single install includes all four providers (Anthropic, OpenAI, Gemini, and
+Cohere).
 
 Install it globally with [pipx](https://pipx.pypa.io):
 
@@ -79,10 +80,10 @@ On first run prompter writes `~/.prompter/config.json`:
 | Key | What it does |
 |-----|--------------|
 | `default_workspace` | Where new projects go when you don't say where. `prompter "make a project called hunchday"` creates `~/Code/hunchday`, not a folder in the current directory. |
-| `provider` | `anthropic`, `openai`, or `gemini`. See [Providers](#providers). |
+| `provider` | `anthropic`, `openai`, `gemini`, or `cohere`. See [Providers](#providers). |
 | `model` | Empty means use the provider's default (listed in the Providers table). Set it to pin a model. |
 | `base_url` | Points the OpenAI adapter at a compatible endpoint such as Groq or OpenRouter. Other providers ignore it. |
-| `api_key_env` | The environment variable that holds the API key. Defaults to `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`. |
+| `api_key_env` | The environment variable that holds the API key. Defaults to `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `COHERE_API_KEY`. |
 | `max_fix_attempts` | How many commands may fail in a row before prompter stops. See [Self-repair](#self-repair). |
 | `auto_approve_safe` | Set to `false` to confirm every command, including safe ones. |
 | `concise` | Set to `true` to make the model write code and scripts with no comments and skip the closing explanation. Saves tokens. Off by default; override per run with `--concise` / `--verbose`. |
@@ -100,13 +101,14 @@ can be overridden for a single run with a flag (see [Flags](#flags)).
 The model backend sits behind one small interface, so prompter behaves the same
 whichever you pick. Set your default with `prompter use <provider> [model]`, or
 override it for one run with `--provider`. Provider names are case-insensitive,
-and `claude`, `gpt`, and `google` work as aliases.
+and `claude`, `gpt`, `google`, and `command` work as aliases.
 
 | Provider | Default model | API key | Notes |
 |----------|---------------|---------|-------|
 | `anthropic` | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | Default. Also reads an `ant auth login` profile. |
 | `openai` | `gpt-5.4` | `OPENAI_API_KEY` | Set `base_url` for Groq or OpenRouter (both speak the OpenAI API). Drop to `gpt-5.4-mini` to go cheaper. |
 | `gemini` | `gemini-3.5-flash` | `GEMINI_API_KEY` | Generous free tier, good for everyday use. |
+| `cohere` | `command-a-03-2025` | `COHERE_API_KEY` | Cohere's flagship Command model. Also reachable via the `command` alias; drop to `command-r-plus` to go cheaper. |
 
 A note on billing. An Anthropic Pro or Max subscription and an API key are
 separate accounts. A program cannot bill against your web subscription. For a
@@ -262,7 +264,7 @@ Flags modify a single run and sit alongside the goal (`prompter --yolo "..."`).
 
 | Flag | Effect |
 |------|--------|
-| `--provider NAME` | Use anthropic, openai, or gemini for this run. |
+| `--provider NAME` | Use anthropic, openai, gemini, or cohere for this run. |
 | `--model ID` | Override the model. |
 | `--base-url URL` | OpenAI-compatible endpoint (Groq, OpenRouter). |
 | `--workspace PATH` | Override the default workspace. |
